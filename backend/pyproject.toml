@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]  # Depends() в сигнатуре — идиома FastAPI, не ошибка
+
+# Миграции — машинный вывод alembic autogenerate; переносить в них строки
+# вручную значит расходиться с тем, что сгенерирует следующая.
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*" = ["E501"]

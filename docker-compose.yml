@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: litclub-db
+    environment:
+      POSTGRES_USER: litclub
+      POSTGRES_PASSWORD: litclub
+      POSTGRES_DB: litclub
+    # 5433 снаружи: тот же порт, что у локального Postgres из Homebrew,
+    # поэтому DATABASE_URL одинаков независимо от способа запуска.
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./.pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litclub -d litclub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
