@@ -50,12 +50,55 @@ curl -s -o /dev/null -w '%{http_code}\n' https://culc-bot.cu3rd.ru/.env
 
 ## Первый запуск
 
+С рабочей машины:
+
 ```bash
-cp .env.example .env   # заполнить TELEGRAM_BOT_TOKEN, SECRET_KEY, POSTGRES_PASSWORD
-docker compose -f docker-compose.prod.yml up -d --build
+deploy/sync.sh kir@СЕРВЕР
 ```
 
-`MINIAPP_URL=https://culc-bot.cu3rd.ru` — этот адрес бот ставит кнопкой меню,
-и по нему же Telegram открывает Mini App.
+Дальше на сервере, в `~/lit-club`:
+
+```bash
+cp .env.example .env
+```
+
+и заполнить: `TELEGRAM_BOT_TOKEN`, `GOOGLE_BOOKS_API_KEY`,
+`BOOTSTRAP_SUPERADMIN_TG_ID`, `SECRET_KEY` (`openssl rand -hex 32`),
+`POSTGRES_PASSWORD` (тоже случайный) и, главное,
+
+```
+MINIAPP_URL=https://culc-bot.cu3rd.ru
+```
+
+Этот адрес бот ставит кнопкой меню, и по нему же Telegram открывает Mini App.
+`DATABASE_URL` из `.env` не нужен — его задаёт compose, база живёт в соседнем
+контейнере.
+
+```bash
+sudo docker compose -f docker-compose.prod.yml up -d --build
+```
+
+## Один токен — один бот
+
+Long polling у Telegram эксклюзивен: два процесса с одним токеном отбирают
+обновления друг у друга, и оба ведут себя странно (в логе — `Conflict:
+terminated by other getUpdates request`). Поэтому **перед запуском на сервере
+нужно остановить локального бота** на ноутбуке:
+
+```bash
+pkill -f "app.bot"
+```
+
+Локальный API и Vite при этом можно оставить: они боту не мешают. А вот
+`scripts/tunnel.sh` лучше тоже остановить — он переписывает `MINIAPP_URL`
+в локальном `.env`, но на сервер тот `.env` не уезжает (`sync.sh` его
+исключает), так что боевой адрес он не собьёт.
+
+## Обновление
+
+```bash
+deploy/sync.sh kir@СЕРВЕР
+ssh kir@СЕРВЕР 'cd ~/lit-club && sudo docker compose -f docker-compose.prod.yml up -d --build'
+```
 
 Бэкап конфига Caddy на хосте: `/etc/caddy/Caddyfile.bak.2026-09-09-150235`.
