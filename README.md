@@ -132,7 +132,16 @@ cd backend && ./venv/bin/pytest && ./venv/bin/ruff check app
 cd miniapp && npm test && npx tsc -b && npx oxlint
 ```
 
-Тесты бэкенда идут в отдельной базе `litclub_test` — она создаётся сама.
+Тесты бэкенда идут в отдельных базах: `litclub_test` и временная
+`litclub_migrations` — в ней проверяется, что `alembic upgrade head` проходит на
+совсем пустой базе. Обе создаются сами, поэтому роль `litclub` должна уметь
+создавать базы:
+
+```bash
+psql -p 5433 -d postgres -c "ALTER ROLE litclub CREATEDB"
+```
+
+Расширение `pg_trgm` руками ставить не нужно — его создаёт первая миграция.
 
 ## Устройство
 

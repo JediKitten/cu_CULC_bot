@@ -2,8 +2,7 @@
 
 import sqlalchemy as sa
 
-from app.models import Book, Demand, User
-from app.models.enums import UserRole
+from app.models import Book, Demand
 from app.services.books.normalize import dedup_key
 from tests.conftest import SUPERADMIN_TG_ID, auth, member
 

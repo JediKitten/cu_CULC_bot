@@ -5,7 +5,6 @@
 """
 
 import httpx
-import pytest
 
 from app.models import Book, BookSource
 from app.models.enums import BookSourceKind
@@ -26,7 +25,9 @@ def test_norm_ignores_case_punctuation_and_yo():
 def test_dedup_key_keeps_author():
     """Две разные книги с одинаковым названием должны остаться разными:
     иначе вторую просто нельзя было бы завести."""
-    assert dedup_key("Метро 2033", ["Дмитрий Глуховский"]) != dedup_key("Метро 2033", ["Иван Петров"])
+    assert dedup_key("Метро 2033", ["Дмитрий Глуховский"]) != dedup_key(
+        "Метро 2033", ["Иван Петров"]
+    )
 
 
 def test_dedupe_merges_by_isbn():

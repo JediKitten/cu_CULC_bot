@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
 
-from app.models import Attendance, Event, EventSlot, Notification, SlotVote, User
+from app.models import Attendance, Notification, SlotVote, User
 from app.models.enums import AttendanceMethod, DecidedBy, EventStatus, NotificationKind
 from app.services import jobs
 from tests.test_voting import build_event
