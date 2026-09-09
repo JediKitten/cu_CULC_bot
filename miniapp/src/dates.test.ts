@@ -3,8 +3,8 @@ import { daysLeft, dateTimeLabel, shortDay, timeLabel } from "./dates";
 
 describe("подписи времени", () => {
   it("показывает время в зоне устройства", () => {
-    // Полдень UTC в Москве — три часа дня.
-    process.env.TZ = "Europe/Moscow";
+    // Полдень UTC в Москве — три часа дня. Зону задаёт npm-скрипт: строчка
+    // process.env.TZ внутри теста сработала бы уже после загрузки модулей.
     expect(timeLabel("2026-10-01T12:00:00Z")).toBe("15:00");
   });
 

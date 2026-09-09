@@ -13,7 +13,7 @@
 
 set -uo pipefail
 
-PORT="${PORT:-5173}"
+PORT="${PORT:-5183}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 TUNNEL_PID=""

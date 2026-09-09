@@ -32,7 +32,9 @@ class Config(BaseSettings):
     google_books_api_key: str = ""
     open_library_base_url: str = "https://openlibrary.org"
     books_language: str = "ru"
-    books_search_timeout: float = 6.0
+    # Open Library на редких запросах отвечает 5–6 секунд, и поиск ждёт самый
+    # медленный источник. Восьми хватает, чтобы он не выпадал из выдачи зря.
+    books_search_timeout: float = 8.0
 
     secret_key: str = "dev-insecure-key"
     display_timezone: str = "Europe/Moscow"

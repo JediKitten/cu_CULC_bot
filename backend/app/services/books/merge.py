@@ -72,6 +72,18 @@ def combine(base: BookCandidate, other: BookCandidate) -> BookCandidate:
     return base
 
 
+def prefer_language(candidates: list[BookCandidate], language: str) -> list[BookCandidate]:
+    """Поднимает книги на языке клуба наверх, ничего не выбрасывая.
+
+    Жёстко ограничивать выдачу языком нельзя: клуб читает и в оригинале, и
+    англоязычное издание для «круглого стола» — нормальный выбор. Но человек,
+    ищущий «Солярис», ждёт русское издание первым, а не польское.
+    """
+    if not language:
+        return candidates
+    return sorted(candidates, key=lambda c: c.language != language)
+
+
 def dedupe(groups: list[list[BookCandidate]]) -> list[BookCandidate]:
     """Склеивает списки кандидатов по ISBN-13, а при его отсутствии — по ключу
     «название|автор». Порядок первого списка сохраняется: он же и приоритетный."""
@@ -143,12 +155,16 @@ async def search(
     degraded = False
     for name, result in zip(("google_books", "open_library"), results, strict=True):
         if isinstance(result, BaseException):
-            logger.warning("Источник %s не ответил: %s", name, result)
+            # У таймаутов httpx текст пустой — без имени класса в логе
+            # осталась бы строка «не ответил: » без причины.
+            logger.warning(
+                "Источник %s не ответил: %s %s", name, type(result).__name__, result
+            )
             degraded = True
             continue
         groups.append(result)
 
-    return dedupe(groups), degraded
+    return prefer_language(dedupe(groups), get_config().books_language), degraded
 
 
 async def find_existing(

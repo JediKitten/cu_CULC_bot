@@ -142,3 +142,20 @@ async def test_ensure_book_is_idempotent(session):
         BookSourceKind.GOOGLE_BOOKS,
         BookSourceKind.OPEN_LIBRARY,
     }
+
+
+def test_language_preference_lifts_without_hiding():
+    """Ограничивать выдачу языком нельзя — клуб читает и в оригинале. Но
+    русское издание должно идти первым."""
+    english = candidate(
+        BookSourceKind.GOOGLE_BOOKS, "g10", "Solaris", ["Stanislaw Lem"], language="en"
+    )
+    russian = candidate(
+        BookSourceKind.GOOGLE_BOOKS, "g11", "Солярис", ["Станислав Лем"], language="ru"
+    )
+    unknown = candidate(BookSourceKind.OPEN_LIBRARY, "OL10W", "Solaris", ["S. Lem"])
+
+    ordered = merge.prefer_language([english, russian, unknown], "ru")
+
+    assert [c.external_id for c in ordered] == ["g11", "g10", "OL10W"]
+    assert len(ordered) == 3  # ничего не потеряли

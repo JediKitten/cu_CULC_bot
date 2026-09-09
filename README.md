@@ -68,7 +68,7 @@ cd backend && ./venv/bin/alembic upgrade head && cd ..
 Сервер API:
 
 ```bash
-cd backend && ./venv/bin/uvicorn app.main:app --reload --reload-include ../.env
+cd backend && ./venv/bin/uvicorn app.main:app --port 8010 --reload --reload-include ../.env
 ```
 
 `--reload-include ../.env` обязателен: uvicorn следит только за `.py`, а
@@ -81,7 +81,12 @@ Mini App (отдельная вкладка терминала):
 cd miniapp && npm install && npm run dev
 ```
 
-Vite проксирует `/api` на бэкенд, поэтому наружу торчит один порт — 5173.
+Vite проксирует `/api` на бэкенд, поэтому наружу торчит один порт — 5183.
+
+Порты выбраны свои — 8010 и 5183: на этой машине рядом крутится киноклуб,
+он занимает 8000 и 5173. У Vite стоит `strictPort`, поэтому занятый порт
+теперь честная ошибка, а не тихий переезд на соседний (иначе туннель
+однажды посветит наружу чужим проектом — так и случилось при первой проверке).
 
 Бот (третья вкладка):
 
