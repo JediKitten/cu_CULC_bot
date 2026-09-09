@@ -26,6 +26,7 @@ from app.models import (
     User,
 )
 from app.models.enums import ApplicationStatus, EventStatus, ParticipationState
+from app.services.reference import program_title
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -146,31 +147,36 @@ async def by_type(
     ]
 
 
-@router.get("/by-faculty")
-async def by_faculty(
+@router.get("/by-program")
+async def by_program(
     _: RequireAdmin, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> list[dict]:
+    """Разрез по направлениям и категориям участников: кто вообще в клубе
+    и кто до встреч доходит."""
     rows = await session.execute(
         sa.select(
-            sa.func.coalesce(Profile.faculty, "—"),
+            Profile.program,
             Profile.member_kind,
+            Profile.study_level,
             sa.func.count(sa.distinct(User.id)),
             sa.func.count(sa.distinct(Attendance.id)),
         )
         .select_from(Profile)
         .join(User, User.id == Profile.user_id)
         .outerjoin(Attendance, Attendance.user_id == User.id)
-        .group_by(Profile.faculty, Profile.member_kind)
+        .group_by(Profile.program, Profile.member_kind, Profile.study_level)
         .order_by(sa.desc(sa.func.count(sa.distinct(User.id))))
     )
     return [
         {
-            "faculty": faculty,
+            "program": program.value if program else None,
+            "program_title": program_title(program.value if program else None) or "—",
             "member_kind": kind.value if kind else None,
+            "study_level": level.value if level else None,
             "people": people,
             "attendances": attendances,
         }
-        for faculty, kind, people, attendances in rows
+        for program, kind, level, people, attendances in rows
     ]
 
 

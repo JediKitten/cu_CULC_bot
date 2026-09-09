@@ -60,8 +60,22 @@ export function Books({ onOpenBook }: { onOpenBook(book: BookBrief, want?: boole
   }
 
   async function want(book: BookBrief) {
-    const id = await materialize(book).catch(() => null);
-    onOpenBook(id === null ? book : { ...book, id }, true);
+    const key = book.id ? `id${book.id}` : `${book.source}:${book.external_id}`;
+    setBusy(key);
+    try {
+      const id = await materialize(book);
+      if (id === null) return;
+      // Отметка ставится сразу, без уточнения формата. Уточнить тип встречи
+      // можно на карточке книги — это отдельный, необязательный шаг.
+      if (book.demanded) await api.dropDemand(id);
+      else await api.addDemand(id, []);
+      const card = await api.getBook(id);
+      setItems((rows) => rows.map((row) => (row === book ? { ...row, ...card } : row)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не получилось");
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (

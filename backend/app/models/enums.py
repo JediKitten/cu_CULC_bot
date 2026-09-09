@@ -54,6 +54,30 @@ class MemberKind(StrEnum):
 EMAIL_REQUIRED_KINDS = frozenset({MemberKind.STUDENT, MemberKind.STAFF})
 
 
+class StudyLevel(StrEnum):
+    """Ступень обучения. У магистрантов направление не спрашиваем."""
+
+    BACHELOR = "bachelor"
+    MASTER = "master"
+
+
+class Program(StrEnum):
+    """Направления ЦУ. «Ещё не определился» — только для первокурсников:
+    со второго курса направление уже выбрано, и этот вариант сбивал бы
+    статистику, изображая неопределённость там, где её нет."""
+
+    DEVELOPMENT = "development"
+    AI = "ai"
+    BUSINESS = "business"
+    DESIGN = "design"
+    UNDECIDED = "undecided"
+
+
+# Направление обязательно относится к бакалавриату: у магистрантов его не
+# спрашивают вовсе.
+UNDECIDED_MAX_YEAR = 1
+
+
 class ReadingPace(StrEnum):
     RARE = "rare"  # несколько книг в год
     STEADY = "steady"  # книга в месяц

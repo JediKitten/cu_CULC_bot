@@ -133,21 +133,29 @@ async def login(client, tg_id: int, name: str) -> str:
     return response.json()["token"]
 
 
+# Почта ЦУ: единственный домен, который принимает анкета.
+CU_EMAIL = "student@edu.centraluniversity.ru"
+
+
 async def onboard(
     client,
     token: str,
     *,
     member_kind: str = "student",
-    email: str | None = "student@univer.ru",
+    email: str | None = CU_EMAIL,
     full_name: str = "Тестовый Участник",
+    study_level: str | None = "bachelor",
+    program: str | None = "development",
+    year: int | None = 2,
 ) -> dict:
     response = await client.put(
         "/api/profile",
         json={
             "member_kind": member_kind,
             "full_name": full_name,
-            "faculty": "Филологический",
-            "year": 2,
+            "study_level": study_level,
+            "program": program,
+            "year": year,
             "university_email": email,
             "reading_pace": "steady",
             "club_experience": "visitor",
@@ -166,6 +174,20 @@ async def member(client, tg_id: int, name: str, **kwargs) -> str:
     token = await login(client, tg_id, name)
     await onboard(client, token, full_name=name, **kwargs)
     return token
+
+
+async def guest(client, tg_id: int, name: str) -> str:
+    """Внешний гость: ни почты, ни ступени, ни курса."""
+    return await member(
+        client,
+        tg_id,
+        name,
+        member_kind="guest",
+        email=None,
+        study_level=None,
+        program=None,
+        year=None,
+    )
 
 
 def auth(token: str) -> dict[str, str]:

@@ -8,7 +8,6 @@
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Demand, DemandType, EventType, ReadingEntry, User
@@ -49,20 +48,23 @@ async def set_demand(
     из спроса. Но факт чтения фиксируем — оргкомитету важно видеть, сколько из
     ожидающих книгу действительно знают.
     """
-    allowed = set(
-        (
-            await session.execute(
-                sa.select(EventType.id).where(
-                    EventType.id.in_(event_type_ids),
-                    EventType.status == EventTypeStatus.ACTIVE,
+    # Форматы необязательны: «хочу встречу по этой книге» — уже полноценный
+    # сигнал, и требовать уточнения значило бы терять отметки тех, кому всё
+    # равно, в каком виде обсуждать. Кто уточнил — тот попадёт в разбивку.
+    allowed: set[int] = set()
+    if event_type_ids:
+        allowed = set(
+            (
+                await session.execute(
+                    sa.select(EventType.id).where(
+                        EventType.id.in_(event_type_ids),
+                        EventType.status == EventTypeStatus.ACTIVE,
+                    )
                 )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
-    if not allowed:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Выберите хотя бы один формат встречи")
 
     entry = (
         await session.execute(

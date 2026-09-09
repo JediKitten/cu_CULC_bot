@@ -2,23 +2,21 @@ import { useEffect, useState } from "react";
 import * as api from "../api";
 import { Onboarding } from "./Onboarding";
 import { dateTimeLabel } from "../dates";
-import { kindLabel } from "../labels";
-import type { Application, ClubEvent, EventType, MyStats, Profile as ProfileData, User } from "../types";
+import { kindLabel, levelLabel } from "../labels";
+import type { Application, ClubEvent, MyStats, Profile as ProfileData, Reference, User } from "../types";
 
 /** Профиль: анкета целиком редактируемая, плюс двери в «Мои книги», друзей,
  * свои заявки и встречи и — у кого есть права — в админку. */
 export function Profile({
   user,
-  genres,
-  eventTypes,
+  reference,
   onOpenBooks,
   onOpenFriends,
   onOpenAdmin,
   onOpenEvent,
 }: {
   user: User;
-  genres: string[];
-  eventTypes: EventType[];
+  reference: Reference;
   onOpenBooks(): void;
   onOpenFriends(): void;
   onOpenAdmin(): void;
@@ -41,8 +39,7 @@ export function Profile({
     return (
       <Onboarding
         initial={profile}
-        genres={genres}
-        eventTypes={eventTypes}
+        reference={reference}
         onSaved={(next) => {
           setProfile(next);
           setEditing(false);
@@ -71,7 +68,8 @@ export function Profile({
           <p className="meta">
             {[
               profile && kindLabel(profile.member_kind),
-              profile?.faculty,
+              profile?.program && programTitle(profile.program, reference),
+              profile?.study_level && levelLabel(profile.study_level),
               profile?.year && `${profile.year} курс`,
             ]
               .filter(Boolean)
@@ -176,4 +174,10 @@ export function Profile({
       )}
     </div>
   );
+}
+
+/** Название направления берём из справочника, а не дублируем списком:
+ * оргкомитет может переименовать его на сервере. */
+function programTitle(program: string, reference: Reference): string {
+  return reference.programs.find((item) => item.key === program)?.title ?? program;
 }

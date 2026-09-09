@@ -1,6 +1,6 @@
 """Фильтр аудитории: встреча «только для студентов» не должна протекать наружу."""
 
-from tests.conftest import SUPERADMIN_TG_ID, auth, member
+from tests.conftest import SUPERADMIN_TG_ID, auth, guest, member
 from tests.test_flow import make_book, type_ids
 
 
@@ -35,27 +35,27 @@ async def approved_event(client, session, *, audience: list[str]) -> int:
 
 async def test_guest_does_not_see_students_only_event(client, session):
     event_id = await approved_event(client, session, audience=["student"])
-    guest = await member(client, 3002, "Гость", member_kind="guest", email=None)
+    outsider = await guest(client, 3002, "Гость")
 
-    board = (await client.get("/api/board", headers=auth(guest))).json()
+    board = (await client.get("/api/board", headers=auth(outsider))).json()
     assert [e["id"] for e in board["events"]] == []
 
     # И по прямой ссылке тоже: существование закрытой встречи — тоже сведения.
-    direct = await client.get(f"/api/events/{event_id}", headers=auth(guest))
+    direct = await client.get(f"/api/events/{event_id}", headers=auth(outsider))
     assert direct.status_code == 404
 
 
 async def test_guest_cannot_vote_or_join_students_only_event(client, session):
     event_id = await approved_event(client, session, audience=["student"])
-    guest = await member(client, 3003, "Гость2", member_kind="guest", email=None)
+    outsider = await guest(client, 3003, "Гость2")
 
     vote = await client.post(
-        f"/api/events/{event_id}/vote", json={"slot_ids": []}, headers=auth(guest)
+        f"/api/events/{event_id}/vote", json={"slot_ids": []}, headers=auth(outsider)
     )
     assert vote.status_code == 404
 
     join = await client.post(
-        f"/api/events/{event_id}/participation", json={"state": "going"}, headers=auth(guest)
+        f"/api/events/{event_id}/participation", json={"state": "going"}, headers=auth(outsider)
     )
     assert join.status_code == 404
 
@@ -70,7 +70,7 @@ async def test_student_sees_students_only_event(client, session):
 
 async def test_empty_audience_means_everyone(client, session):
     event_id = await approved_event(client, session, audience=[])
-    guest = await member(client, 3005, "Гость3", member_kind="guest", email=None)
+    outsider = await guest(client, 3005, "Гость3")
 
-    board = (await client.get("/api/board", headers=auth(guest))).json()
+    board = (await client.get("/api/board", headers=auth(outsider))).json()
     assert event_id in [e["id"] for e in board["events"]]

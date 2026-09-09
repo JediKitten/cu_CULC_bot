@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as api from "../api";
-import type { EventType, MemberKind, Profile } from "../types";
+import type { MemberKind, Profile, Reference, StudyLevel } from "../types";
 
 const KINDS: { key: MemberKind; label: string; hint: string }[] = [
   { key: "student", label: "Студент", hint: "учусь здесь" },
@@ -21,24 +21,29 @@ const EXPERIENCE = [
   { key: "organizer", label: "Вёл встречи" },
 ];
 
+const LEVELS: { key: StudyLevel; label: string }[] = [
+  { key: "bachelor", label: "Бакалавриат" },
+  { key: "master", label: "Магистратура" },
+];
+
 /** Анкета. Она же форма правки профиля — правила одни и те же, и держать две
  * формы значило бы однажды забыть про одну из них. */
 export function Onboarding({
   initial,
-  genres,
-  eventTypes,
+  reference,
   onSaved,
   onCancel,
 }: {
   initial: Profile | null;
-  genres: string[];
-  eventTypes: EventType[];
+  reference: Reference;
   onSaved(profile: Profile): void;
   onCancel?: () => void;
 }) {
+  const { genres, event_types: eventTypes, programs, email_domains: emailDomains } = reference;
   const [kind, setKind] = useState<MemberKind>(initial?.member_kind ?? "student");
   const [fullName, setFullName] = useState(initial?.full_name ?? "");
-  const [faculty, setFaculty] = useState(initial?.faculty ?? "");
+  const [level, setLevel] = useState<StudyLevel | "">(initial?.study_level ?? "");
+  const [program, setProgram] = useState(initial?.program ?? "");
   const [year, setYear] = useState(initial?.year ? String(initial.year) : "");
   const [email, setEmail] = useState(initial?.university_email ?? "");
   const [pace, setPace] = useState(initial?.reading_pace ?? "");
@@ -52,7 +57,13 @@ export function Onboarding({
   // Почта нужна только своим: у абитуриента и внешнего гостя её просто нет,
   // а требовать её означало бы закрыть им вход.
   const emailRequired = kind === "student" || kind === "staff";
-  const asksFaculty = kind !== "guest";
+  const isStudent = kind === "student";
+  // У магистрантов направление не спрашивают вовсе.
+  const asksProgram = isStudent && level === "bachelor";
+  const firstYear = year === "" || year === "1";
+  // «Ещё не определился» — только на первом курсе: со второго направление
+  // уже выбрано, и вариант бы только путал.
+  const shownPrograms = programs.filter((item) => !item.first_year_only || firstYear);
 
   async function save() {
     setBusy(true);
@@ -60,7 +71,8 @@ export function Onboarding({
       const profile = await api.saveProfile({
         member_kind: kind,
         full_name: fullName,
-        faculty: faculty || null,
+        study_level: level || null,
+        program: (program || null) as Profile["program"],
         year: year ? Number(year) : null,
         university_email: email || null,
         reading_pace: (pace || null) as Profile["reading_pace"],
@@ -107,35 +119,73 @@ export function Onboarding({
 
       {emailRequired && (
         <label className="field">
-          <span>Вузовская почта (обязательно)</span>
+          <span>Почта ЦУ (обязательно)</span>
           <input
             type="email"
             value={email}
-            placeholder="ivanov@univer.ru"
+            placeholder={`ivanov@${emailDomains[0] ?? "edu.centraluniversity.ru"}`}
             onChange={(e) => setEmail(e.target.value)}
           />
+          <span className="hint">
+            Принимается только почта в домене{" "}
+            {emailDomains.map((domain) => `@${domain}`).join(" или ")}
+          </span>
         </label>
       )}
 
-      {asksFaculty && (
-        <div className="grid-2">
-          <label className="field">
-            <span>Факультет</span>
-            <input value={faculty} onChange={(e) => setFaculty(e.target.value)} />
+      {isStudent && (
+        <>
+          <h2>Ступень</h2>
+          <div className="row row--wrap">
+            {LEVELS.map((item) => (
+              <button
+                key={item.key}
+                className={`chip ${level === item.key ? "chip--on" : ""}`}
+                onClick={() => {
+                  setLevel(item.key);
+                  // Направление относится только к бакалавриату — при
+                  // переключении на магистратуру выбранное перестаёт значить.
+                  if (item.key === "master") setProgram("");
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <label className="field" style={{ marginTop: 12 }}>
+            <span>Курс</span>
+            <input
+              type="number"
+              min={1}
+              max={8}
+              value={year}
+              onChange={(e) => {
+                setYear(e.target.value);
+                // Со второго курса «не определился» недоступно — снимаем,
+                // чтобы форма не отправляла то, чего в ней уже не видно.
+                if (e.target.value !== "1" && program === "undecided") setProgram("");
+              }}
+            />
           </label>
-          {kind === "student" && (
-            <label className="field">
-              <span>Курс</span>
-              <input
-                type="number"
-                min={1}
-                max={8}
-                value={year}
-                onChange={(e) => setYear(e.target.value)}
-              />
-            </label>
+
+          {asksProgram && (
+            <>
+              <h2>Направление</h2>
+              <div className="row row--wrap">
+                {shownPrograms.map((item) => (
+                  <button
+                    key={item.key}
+                    className={`chip ${program === item.key ? "chip--on" : ""}`}
+                    onClick={() => setProgram(item.key)}
+                  >
+                    {item.title}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
-        </div>
+        </>
       )}
 
       <h2>Как читаете</h2>

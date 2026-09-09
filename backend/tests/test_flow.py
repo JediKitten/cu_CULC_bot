@@ -179,13 +179,33 @@ async def test_full_scenario(client, session):
     assert feedback.json()["my_feedback_score"] == 9
 
 
-async def test_demand_requires_a_format(client, session):
+async def test_demand_without_formats_is_enough(client, session):
+    """«Хочу встречу» — уже полноценная отметка. Требовать уточнения формата
+    значило бы терять тех, кому всё равно, в каком виде обсуждать."""
     reader = await member(client, 2010, "Молчун")
     book = await make_book(session, "Пикник на обочине", ["Стругацкие"])
+
     response = await client.post(
         f"/api/books/{book.id}/demand", json={"event_type_ids": []}, headers=auth(reader)
     )
-    assert response.status_code == 422  # пустой список отбивает уже схема
+    assert response.status_code == 204
+
+    card = (await client.get(f"/api/books/{book.id}", headers=auth(reader))).json()
+    assert card["demanded"] is True
+    assert card["demand_count"] == 1
+    assert card["my_demand_type_ids"] == []
+
+    # Уточнить формат можно позже — той же ручкой.
+    types = await type_ids(client, reader)
+    await client.post(
+        f"/api/books/{book.id}/demand",
+        json={"event_type_ids": types[:1]},
+        headers=auth(reader),
+    )
+    card = (await client.get(f"/api/books/{book.id}", headers=auth(reader))).json()
+    assert card["my_demand_type_ids"] == types[:1]
+    # Отметка осталась одна, а не превратилась во вторую.
+    assert card["demand_count"] == 1
 
 
 async def test_second_read_tap_removes_empty_mark(client, session):

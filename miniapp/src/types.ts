@@ -1,5 +1,7 @@
 export type Role = "user" | "moderator" | "admin" | "superadmin";
 export type MemberKind = "student" | "applicant" | "staff" | "guest";
+export type StudyLevel = "bachelor" | "master";
+export type Program = "development" | "ai" | "business" | "design" | "undecided";
 export type ReadingStatus = "want_to_read" | "reading" | "finished" | "abandoned";
 export type EventStatus =
   | "slot_selection"
@@ -32,12 +34,25 @@ export type EventType = {
   requires_reading: boolean;
 };
 
-export type Reference = { genres: string[]; event_types: EventType[] };
+export type ProgramOption = {
+  key: Program;
+  title: string;
+  /** «Ещё не определился» — только для первокурсников. */
+  first_year_only: boolean;
+};
+
+export type Reference = {
+  genres: string[];
+  event_types: EventType[];
+  programs: ProgramOption[];
+  email_domains: string[];
+};
 
 export type Profile = {
   member_kind: MemberKind;
   full_name: string;
-  faculty: string | null;
+  study_level: StudyLevel | null;
+  program: Program | null;
   year: number | null;
   university_email: string | null;
   reading_pace: "rare" | "steady" | "fast" | null;
@@ -166,7 +181,7 @@ export type PersonBrief = {
   display_name: string;
   photo_url: string | null;
   tg_username: string | null;
-  faculty: string | null;
+  program: Program | null;
   member_kind: MemberKind | null;
   friendship: "none" | "outgoing" | "incoming" | "friends" | null;
 };

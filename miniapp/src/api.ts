@@ -197,7 +197,14 @@ export const byType = () =>
       avg_score: number | null;
     }[]
   >("/api/analytics/by-type");
-export const byFaculty = () =>
+export const byProgram = () =>
   request<
-    { faculty: string; member_kind: string | null; people: number; attendances: number }[]
-  >("/api/analytics/by-faculty");
+    {
+      program: string | null;
+      program_title: string;
+      member_kind: string | null;
+      study_level: string | null;
+      people: number;
+      attendances: number;
+    }[]
+  >("/api/analytics/by-program");

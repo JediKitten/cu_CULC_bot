@@ -8,10 +8,12 @@ from app.models.enums import (
     EventStatus,
     MemberKind,
     ParticipationState,
+    Program,
     ReadingPace,
     ReadingStatus,
     RequestStatus,
     RoomStatus,
+    StudyLevel,
     UserRole,
 )
 
@@ -48,7 +50,8 @@ class EventTypeOut(BaseModel):
 class ProfileOut(BaseModel):
     member_kind: MemberKind
     full_name: str
-    faculty: str | None = None
+    study_level: StudyLevel | None = None
+    program: Program | None = None
     year: int | None = None
     university_email: str | None = None
     reading_pace: ReadingPace | None = None
@@ -63,7 +66,8 @@ class ProfileOut(BaseModel):
 class ProfileIn(BaseModel):
     member_kind: MemberKind
     full_name: str = Field(min_length=1, max_length=128)
-    faculty: str | None = Field(default=None, max_length=128)
+    study_level: StudyLevel | None = None
+    program: Program | None = None
     year: int | None = Field(default=None, ge=1, le=8)
     university_email: str | None = Field(default=None, max_length=255)
     reading_pace: ReadingPace | None = None
@@ -73,11 +77,22 @@ class ProfileIn(BaseModel):
     about: str | None = Field(default=None, max_length=2000)
 
 
+class ProgramOut(BaseModel):
+    key: Program
+    title: str
+    # Первокурсникам показываем «ещё не определился», остальным — нет.
+    first_year_only: bool = False
+
+
 class ReferenceOut(BaseModel):
     """Всё, что нужно нарисовать анкету, одним запросом."""
 
     genres: list[str]
     event_types: list[EventTypeOut]
+    programs: list[ProgramOut] = []
+    # Домен, который принимает почта. Показываем подсказкой в форме, чтобы
+    # человек узнавал об ограничении до отправки, а не из ошибки.
+    email_domains: list[str] = []
 
 
 # --- Книги -------------------------------------------------------------------
@@ -178,7 +193,9 @@ class BookRequestOut(BaseModel):
 
 
 class DemandIn(BaseModel):
-    event_type_ids: list[int] = Field(min_length=1)
+    # Пустой список допустим: «хочу встречу» само по себе полноценная отметка,
+    # а форматы — необязательное уточнение.
+    event_type_ids: list[int] = []
     comment: str | None = Field(default=None, max_length=500)
 
 
@@ -325,7 +342,7 @@ class PersonBrief(BaseModel):
     display_name: str
     photo_url: str | None = None
     tg_username: str | None = None
-    faculty: str | None = None
+    program: Program | None = None
     member_kind: MemberKind | None = None
     friendship: str | None = None  # none | outgoing | incoming | friends
 

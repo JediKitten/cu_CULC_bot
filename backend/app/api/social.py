@@ -44,7 +44,7 @@ async def _brief(session: AsyncSession, person: User, me: int) -> PersonBrief:
         display_name=person.display_name,
         photo_url=person.photo_url,
         tg_username=person.tg_username,
-        faculty=profile.faculty if profile else None,
+        program=profile.program if profile else None,
         member_kind=profile.member_kind if profile else None,
         friendship=await _relation(session, me, person.id),
     )

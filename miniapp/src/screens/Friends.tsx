@@ -145,7 +145,9 @@ function Person({ person, action }: { person: PersonBrief; action: React.ReactNo
       )}
       <span style={{ flex: 1 }}>
         <b>{person.display_name}</b>
-        <div className="meta">{person.faculty ?? (person.tg_username ? `@${person.tg_username}` : "")}</div>
+        <div className="meta">
+          {person.tg_username ? `@${person.tg_username}` : ""}
+        </div>
       </span>
       {action}
     </div>

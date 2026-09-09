@@ -9,9 +9,9 @@ from app.db import get_session
 from app.models import Profile, ProfileEventType
 from app.models.demand import EventType
 from app.models.enums import EventTypeStatus
-from app.schemas import EventTypeOut, ProfileIn, ProfileOut, ReferenceOut
+from app.schemas import EventTypeOut, ProfileIn, ProfileOut, ProgramOut, ReferenceOut
 from app.services import profiles
-from app.services.reference import GENRES
+from app.services.reference import FIRST_YEAR_ONLY, GENRES, PROGRAM_TITLES
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
@@ -32,6 +32,11 @@ async def reference(
     return ReferenceOut(
         genres=list(GENRES),
         event_types=[EventTypeOut.model_validate(row, from_attributes=True) for row in rows],
+        programs=[
+            ProgramOut(key=key, title=title, first_year_only=key in FIRST_YEAR_ONLY)
+            for key, title in PROGRAM_TITLES.items()
+        ],
+        email_domains=list(profiles.CU_EMAIL_DOMAINS),
     )
 
 
@@ -54,7 +59,8 @@ async def save_profile(
         user.id,
         member_kind=body.member_kind,
         full_name=body.full_name,
-        faculty=body.faculty,
+        study_level=body.study_level,
+        program=body.program,
         year=body.year,
         university_email=body.university_email,
         reading_pace=body.reading_pace,
@@ -81,7 +87,8 @@ async def _out(session: AsyncSession, profile: Profile) -> ProfileOut:
     return ProfileOut(
         member_kind=profile.member_kind,
         full_name=profile.full_name,
-        faculty=profile.faculty,
+        study_level=profile.study_level,
+        program=profile.program,
         year=profile.year,
         university_email=profile.university_email,
         reading_pace=profile.reading_pace,

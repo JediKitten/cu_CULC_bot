@@ -40,3 +40,22 @@ def clean_genres(values: list[str] | None) -> list[str]:
         return []
     chosen = set(values)
     return [genre for genre in GENRES if genre in chosen]
+
+
+# Направления ЦУ. Порядок и подписи живут здесь, а не в интерфейсе: анкету
+# рисует и клиент, и оргкомитет читает те же названия в аналитике.
+PROGRAM_TITLES: dict[str, str] = {
+    "development": "Разработка",
+    "ai": "Искусственный интеллект",
+    "business": "Бизнес и аналитика",
+    "design": "Дизайн",
+    "undecided": "Ещё не определился",
+}
+
+# Этот вариант показываем только первокурсникам: со второго курса направление
+# уже выбрано, и «не определился» изображал бы неопределённость там, где её нет.
+FIRST_YEAR_ONLY = frozenset({"undecided"})
+
+
+def program_title(key: str | None) -> str | None:
+    return PROGRAM_TITLES.get(key) if key else None

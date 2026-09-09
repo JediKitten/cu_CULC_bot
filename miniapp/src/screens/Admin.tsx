@@ -1,13 +1,24 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
-import { audienceLabel } from "../labels";
+import { audienceLabel, kindLabel } from "../labels";
 import type { Application, BookRequest, MemberKind, Room, Setting } from "../types";
 
 const KINDS: MemberKind[] = ["student", "applicant", "staff", "guest"];
-const TABS = ["Заявки", "Книги", "Переговорки", "Настройки", "Аналитика"] as const;
+const TABS = ["Заявки", "Книги", "Переговорки", "Роли", "Настройки", "Аналитика"] as const;
 
-/** Панель оргкомитета. Пять вкладок вместо пяти экранов: всё, чем управляют
- * руками, живёт в одном месте, и не нужно помнить, где что. */
+const ROLES: { key: string; title: string; hint: string }[] = [
+  { key: "user", title: "Участник", hint: "обычный доступ" },
+  { key: "moderator", title: "Модератор", hint: "модерация книг" },
+  { key: "admin", title: "Администратор", hint: "заявки, встречи, аналитика" },
+  {
+    key: "superadmin",
+    title: "Главный администратор",
+    hint: "то же плюс настройки и раздача ролей",
+  },
+];
+
+/** Панель оргкомитета. Одно место вместо россыпи экранов: всё, чем управляют
+ * руками, лежит рядом, и не нужно помнить, где что. */
 export function Admin({ onClose, role }: { onClose(): void; role: string }) {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Заявки");
 
@@ -35,6 +46,7 @@ export function Admin({ onClose, role }: { onClose(): void; role: string }) {
         {tab === "Заявки" && <Applications />}
         {tab === "Книги" && <BookRequests />}
         {tab === "Переговорки" && <Rooms />}
+        {tab === "Роли" && <Roles canEdit={role === "superadmin"} />}
         {tab === "Настройки" && <Settings canEdit={role === "superadmin"} />}
         {tab === "Аналитика" && <Analytics />}
       </div>
@@ -253,6 +265,95 @@ function Rooms() {
   );
 }
 
+function Roles({ canEdit }: { canEdit: boolean }) {
+  const [people, setPeople] = useState<
+    { id: number; name: string; username: string | null; role: string }[]
+  >([]);
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = () => api.people().then(setPeople).catch((e) => setError(e.message));
+  useEffect(() => {
+    reload();
+  }, []);
+
+  async function assign(userId: number, next: string) {
+    const person = people.find((p) => p.id === userId);
+    if (
+      next === "superadmin" &&
+      !confirm(
+        `Выдать «${person?.name}» права главного администратора? ` +
+          "Он сможет менять настройки клуба и раздавать роли, в том числе снимать их с других.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.setRole(userId, next);
+      setError(null);
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не получилось");
+    }
+  }
+
+  const shown = query.trim()
+    ? people.filter((p) =>
+        `${p.name} ${p.username ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()),
+      )
+    : people;
+
+  return (
+    <>
+      {!canEdit && (
+        <p className="hint">
+          Раздавать роли может только главный администратор. Список ниже — для справки.
+        </p>
+      )}
+      <p className="hint">
+        {ROLES.map((r) => `${r.title} — ${r.hint}`).join("; ")}.
+      </p>
+
+      <div className="search">
+        <input
+          type="search"
+          value={query}
+          placeholder="Найти по имени или @нику"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      {error && <p className="error">{error}</p>}
+
+      {shown.length === 0 && <p className="hint">Никого не нашли.</p>}
+      {shown.map((person) => (
+        <div className="card" key={person.id}>
+          <div className="spread">
+            <b>{person.name}</b>
+            <span className={`badge ${person.role !== "user" ? "badge--ok" : ""}`}>
+              {ROLES.find((r) => r.key === person.role)?.title ?? person.role}
+            </span>
+          </div>
+          {person.username && <div className="meta">@{person.username}</div>}
+          {canEdit && (
+            <div className="row row--wrap" style={{ marginTop: 8 }}>
+              {ROLES.map((r) => (
+                <button
+                  key={r.key}
+                  className={`chip ${person.role === r.key ? "chip--on" : ""}`}
+                  disabled={person.role === r.key}
+                  onClick={() => assign(person.id, r.key)}
+                >
+                  {r.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function Settings({ canEdit }: { canEdit: boolean }) {
   const [items, setItems] = useState<Setting[]>([]);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -321,11 +422,15 @@ function Analytics() {
   const [types, setTypes] = useState<
     { type: string; events: number; attendances: number; avg_score: number | null }[]
   >([]);
+  const [programs, setPrograms] = useState<
+    { program_title: string; member_kind: string | null; people: number; attendances: number }[]
+  >([]);
 
   useEffect(() => {
     api.funnel().then(setFunnel);
     api.unmetDemand().then(setUnmet);
     api.byType().then(setTypes);
+    api.byProgram().then(setPrograms);
   }, []);
 
   const labels: Record<string, string> = {
@@ -358,6 +463,28 @@ function Analytics() {
           <span className="badge badge--waiting">{row.waiting}</span>
         </div>
       ))}
+
+      <h2>По направлениям</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Направление</th>
+            <th>Кто</th>
+            <th>Людей</th>
+            <th>Посещений</th>
+          </tr>
+        </thead>
+        <tbody>
+          {programs.map((row, index) => (
+            <tr key={index}>
+              <td>{row.program_title}</td>
+              <td>{row.member_kind ? kindLabel(row.member_kind) : "—"}</td>
+              <td>{row.people}</td>
+              <td>{row.attendances}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       <h2>По форматам</h2>
       <table>

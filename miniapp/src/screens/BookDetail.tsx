@@ -71,13 +71,12 @@ export function BookDetail({
     }
   }
 
-  async function saveDemand() {
-    if (!card?.id || chosen.length === 0) return;
+  async function saveDemand(types: number[] = chosen) {
+    if (!card?.id) return;
     setBusy(true);
     try {
-      await api.addDemand(card.id, chosen);
+      await api.addDemand(card.id, types);
       setCard(await api.getBook(card.id));
-      setWantOpen(false);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не получилось");
@@ -227,58 +226,69 @@ export function BookDetail({
               </div>
             )}
 
-            {!wantOpen && !card.demanded && (
-              <button className="primary" onClick={() => setWantOpen(true)}>
+            {!card.demanded ? (
+              <button className="primary" disabled={busy} onClick={() => saveDemand([])}>
                 Хочу встречу по этой книге
               </button>
-            )}
-
-            {(wantOpen || card.demanded) && (
-              <div className="card">
-                <p className="hint">
-                  Какие форматы вам интересны? Можно отметить несколько — оргкомитет увидит,
-                  чего именно ждут.
+            ) : (
+              <>
+                <p className="notice" style={{ marginBottom: 8 }}>
+                  Вы в списке ожидающих. Если хочется встречи определённого вида —
+                  уточните, оргкомитет это учтёт.
                 </p>
-                {eventTypes.map((type) => (
-                  <label className="check" key={type.id}>
-                    <input
-                      type="checkbox"
-                      checked={chosen.includes(type.id)}
-                      onChange={(e) =>
-                        setChosen((prev) =>
-                          e.target.checked
-                            ? [...prev, type.id]
-                            : prev.filter((id) => id !== type.id),
-                        )
-                      }
-                    />
-                    <span>
-                      <b>{type.title}</b>
-                      {type.description && <div className="hint">{type.description}</div>}
-                      {!type.requires_reading && (
-                        <div className="hint">Читать заранее не обязательно</div>
-                      )}
-                    </span>
-                  </label>
-                ))}
+
                 <button
-                  className="primary"
-                  disabled={busy || chosen.length === 0}
-                  onClick={saveDemand}
+                  className="ghost"
+                  style={{ width: "100%" }}
+                  onClick={() => setWantOpen((open) => !open)}
+                  aria-expanded={wantOpen}
                 >
-                  {card.demanded ? "Сохранить выбор" : "Жду такую встречу"}
+                  Уточнить тип встречи
+                  {chosen.length > 0 && ` · выбрано ${chosen.length}`}
+                  <span className={`section__chevron ${wantOpen ? "is-open" : ""}`} aria-hidden>
+                    {" ▾"}
+                  </span>
                 </button>
-                {card.demanded && (
-                  <button
-                    className="ghost danger"
-                    style={{ marginTop: 8, width: "100%" }}
-                    disabled={busy}
-                    onClick={dropDemand}
-                  >
-                    Больше не жду
-                  </button>
+
+                {wantOpen && (
+                  <div className="card" style={{ marginTop: 8 }}>
+                    {eventTypes.map((type) => (
+                      <label className="check" key={type.id}>
+                        <input
+                          type="checkbox"
+                          checked={chosen.includes(type.id)}
+                          disabled={busy}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...chosen, type.id]
+                              : chosen.filter((id) => id !== type.id);
+                            setChosen(next);
+                            // Сохраняем сразу: отдельная кнопка «сохранить»
+                            // под галочками — лишний шаг, который легко забыть.
+                            saveDemand(next);
+                          }}
+                        />
+                        <span>
+                          <b>{type.title}</b>
+                          {type.description && <div className="hint">{type.description}</div>}
+                          {!type.requires_reading && (
+                            <div className="hint">Читать заранее не обязательно</div>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 )}
-              </div>
+
+                <button
+                  className="ghost danger"
+                  style={{ marginTop: 8, width: "100%" }}
+                  disabled={busy}
+                  onClick={dropDemand}
+                >
+                  Больше не жду
+                </button>
+              </>
             )}
 
             <button

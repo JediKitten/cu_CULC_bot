@@ -11,7 +11,7 @@ import { MyBooks } from "./screens/MyBooks";
 import { Onboarding } from "./screens/Onboarding";
 import { Profile } from "./screens/Profile";
 import { initTelegram } from "./telegram";
-import type { BookBrief, BookCard, EventType, User } from "./types";
+import type { BookBrief, BookCard, Reference, User } from "./types";
 
 type Tab = "books" | "events" | "profile";
 
@@ -28,8 +28,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("books");
-  const [genres, setGenres] = useState<string[]>([]);
-  const [eventTypes, setEventTypes] = useState<EventType[]>([]);
+  const [reference, setReference] = useState<Reference | null>(null);
 
   // Оверлеи поверх вкладок. Роутера нет: экранов немного, а ссылка из
   // уведомления приходит параметром — этого хватает.
@@ -44,9 +43,7 @@ export default function App() {
       .login()
       .then(async (loaded) => {
         setUser(loaded);
-        const reference = await api.reference();
-        setGenres(reference.genres);
-        setEventTypes(reference.event_types);
+        setReference(await api.reference());
       })
       .catch((e) => setAuthError(e instanceof Error ? e.message : "Не удалось войти"));
   }, []);
@@ -79,7 +76,7 @@ export default function App() {
     );
   }
 
-  if (!user) return <div className="center">Загружаем…</div>;
+  if (!user || !reference) return <div className="center">Загружаем…</div>;
 
   // До анкеты остальное приложение закрыто — и на сервере тоже, эта проверка
   // лишь избавляет от бессмысленных 403.
@@ -88,8 +85,7 @@ export default function App() {
       <div className="app">
         <Onboarding
           initial={null}
-          genres={genres}
-          eventTypes={eventTypes}
+          reference={reference}
           onSaved={() => setUser({ ...user, onboarded: true })}
         />
       </div>
@@ -112,8 +108,7 @@ export default function App() {
       {tab === "profile" && (
         <Profile
           user={user}
-          genres={genres}
-          eventTypes={eventTypes}
+          reference={reference}
           onOpenBooks={() => setScreen("books")}
           onOpenFriends={() => setScreen("friends")}
           onOpenAdmin={() => setScreen("admin")}
@@ -124,7 +119,7 @@ export default function App() {
       {openBook && (
         <BookDetail
           book={openBook.book}
-          eventTypes={eventTypes}
+          eventTypes={reference.event_types}
           wantOnOpen={openBook.want}
           onClose={() => setOpenBook(null)}
           onOrganize={(card) => {
@@ -141,7 +136,7 @@ export default function App() {
       {organizeFor && (
         <ApplicationForm
           book={organizeFor}
-          eventTypes={eventTypes}
+          eventTypes={reference.event_types}
           onClose={() => setOrganizeFor(null)}
           onSent={() => {
             setOrganizeFor(null);
