@@ -101,6 +101,42 @@ async def find(client: httpx.AsyncClient, title: str, author: str) -> BookCandid
     return await attempt(client, plain, plain, title, author)
 
 
+async def retitle() -> int:
+    """Приводит названия и авторов уже заведённых книг к выверенному списку.
+
+    Отдельный проход, потому что первые прогоны сохраняли то, что отдал
+    источник. Сети не требует: сопоставляем по нормализованному названию,
+    той же меркой, что и при поиске.
+    """
+    fixed = 0
+    async with SessionLocal() as session:
+        books = list((await session.execute(sa.select(Book))).scalars().all())
+
+        for author, title in SEED:
+            wanted = norm(title)
+            surname = norm(author).split()[-1]
+            match = next(
+                (
+                    book
+                    for book in books
+                    if norm(book.title).startswith(wanted)
+                    and any(surname in norm(name) for name in (book.authors or []))
+                ),
+                None,
+            )
+            if match is None or (match.title == title and (match.authors or [None])[0] == author):
+                continue
+
+            match.title = title
+            match.authors = [author]
+            match.dedup_key = dedup_key(title, [author])
+            fixed += 1
+            logger.info("~ %s — %s", author, title)
+
+        await session.commit()
+    return fixed
+
+
 async def run(limit: int | None, dry_run: bool, only_missing: bool) -> None:
     books = SEED[:limit] if limit else SEED
 
@@ -133,6 +169,12 @@ async def run(limit: int | None, dry_run: bool, only_missing: bool) -> None:
             logger.info("[%3d/%d] ✗ не нашли: %s — %s", index, len(books), author, title)
             await asyncio.sleep(DELAY_SECONDS)
             continue
+
+        # Название и автор берутся из выверенного списка, а не из источника:
+        # оттуда приезжает «Метро 2033. Часть 3, 4» и «граф Лео Толстой».
+        # Источник ценен обложкой, ISBN, описанием и годом — не подписью.
+        candidate.title = title
+        candidate.authors = [author, *[a for a in candidate.authors if norm(a) != norm(author)]]
 
         if dry_run:
             logger.info(
@@ -171,12 +213,20 @@ def main() -> None:
         action="store_true",
         help="искать только то, чего ещё нет в каталоге",
     )
+    parser.add_argument(
+        "--retitle",
+        action="store_true",
+        help="привести названия уже заведённых книг к списку, без обращений к сети",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     # httpx рассказывает про каждый запрос — на двухстах книгах это четыреста
     # строк, в которых тонет то, ради чего скрипт запускали.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    if args.retitle:
+        logger.info("Поправлено книг: %d", asyncio.run(retitle()))
+        return
     asyncio.run(run(args.limit, args.dry_run, args.only_missing))
 
 
