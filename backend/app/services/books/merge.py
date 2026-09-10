@@ -54,12 +54,20 @@ def book_to_candidate(book: Book) -> BookCandidate:
         isbn13=book.isbn13,
         language=book.language,
         genres=list(book.genres or []),
+        world_rating=book.world_rating,
+        world_ratings_count=book.world_ratings_count,
         book_id=book.id,
     )
 
 
 def combine(base: BookCandidate, other: BookCandidate) -> BookCandidate:
     """Дополняет карточку данными второго источника, не перетирая заполненное."""
+    # Известность берём у того источника, где голосов больше: у Google Books
+    # и Open Library разный охват, и меньшее число просто хуже осведомлено.
+    if (other.world_ratings_count or 0) > (base.world_ratings_count or 0):
+        base.world_rating = other.world_rating
+        base.world_ratings_count = other.world_ratings_count
+
     for attribute in ("year", "cover_url", "description", "page_count", "isbn13", "language"):
         if getattr(base, attribute) in (None, "") and getattr(other, attribute) not in (None, ""):
             setattr(base, attribute, getattr(other, attribute))
@@ -221,6 +229,8 @@ async def ensure_book(
             isbn13=candidate.isbn13,
             language=candidate.language,
             genres=candidate.genres,
+            world_rating=candidate.world_rating,
+            world_ratings_count=candidate.world_ratings_count,
             dedup_key=dedup_key(candidate.title, candidate.authors),
             added_by_user_id=added_by,
         )
@@ -233,6 +243,10 @@ async def ensure_book(
         book.isbn13 = book.isbn13 or candidate.isbn13
         book.page_count = book.page_count or candidate.page_count
         book.year = book.year or candidate.year
+        # Известность обновляем, когда источник знает больше, чем мы записали.
+        if (candidate.world_ratings_count or 0) > (book.world_ratings_count or 0):
+            book.world_rating = candidate.world_rating
+            book.world_ratings_count = candidate.world_ratings_count
 
     if candidate.source is not BookSourceKind.MANUAL:
         await session.execute(

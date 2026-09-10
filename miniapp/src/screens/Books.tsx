@@ -9,8 +9,15 @@ import type { BookBrief, BookCard } from "../types";
  * Как только начинают искать, подключаются Google Books и Open Library:
  * показывать чужой каталог целиком вместо своей полки бессмысленно.
  */
+const SORTS = [
+  { key: "new", label: "Новые" },
+  { key: "club", label: "Оценки клуба" },
+  { key: "world", label: "Известные в мире" },
+];
+
 export function Books({ onOpenBook }: { onOpenBook(book: BookBrief, want?: boolean): void }) {
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("new");
   const [items, setItems] = useState<BookBrief[]>([]);
   const [degraded, setDegraded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -23,7 +30,7 @@ export function Books({ onOpenBook }: { onOpenBook(book: BookBrief, want?: boole
     const timer = setTimeout(() => {
       setLoading(true);
       api
-        .searchBooks(query)
+        .searchBooks(query, true, sort)
         .then((result) => {
           setItems(result.items);
           setDegraded(result.sources_degraded);
@@ -33,7 +40,7 @@ export function Books({ onOpenBook }: { onOpenBook(book: BookBrief, want?: boole
         .finally(() => setLoading(false));
     }, query ? 400 : 0);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, sort]);
 
   /** Книга из внешней выдачи попадает в каталог в момент первого действия
    * с ней: до этого держать у себя чужой каталог незачем. */
@@ -91,6 +98,22 @@ export function Books({ onOpenBook }: { onOpenBook(book: BookBrief, want?: boole
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
+
+      {/* Сортировка относится к каталогу клуба: у поисковой выдачи свой
+          порядок — по совпадению с запросом, и перебивать его нечем. */}
+      {!query && (
+        <div className="row row--wrap" style={{ marginBottom: 12 }}>
+          {SORTS.map((item) => (
+            <button
+              key={item.key}
+              className={`chip ${sort === item.key ? "chip--on" : ""}`}
+              onClick={() => setSort(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {degraded && (
         <p className="notice">

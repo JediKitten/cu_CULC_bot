@@ -73,6 +73,11 @@ class BookCandidate:
     isbn13: str | None = None
     language: str | None = None
     genres: list[str] = field(default_factory=list)
+    # Насколько книга известна снаружи: средняя оценка и сколько людей её
+    # поставили. У разных источников шкалы одинаковые (пять баллов), а вот
+    # охват разный, поэтому берём того, у кого оценок больше.
+    world_rating: float | None = None
+    world_ratings_count: int | None = None
     payload: dict = field(default_factory=dict)
     # Заполнено, если книга уже заведена в каталоге.
     book_id: int | None = None

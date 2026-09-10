@@ -11,6 +11,26 @@ import type { BookBrief } from "../types";
  * всё понятно, дополнительные кнопки сворачиваются: список должен
  * оставаться списком.
  */
+/** Оценка книги: своя клубная, а при её отсутствии — мировая.
+ *
+ * Клубная важнее даже при одной-двух оценках: она про своих, а мировая
+ * усредняет миллионы чужих. Но пока в клубе не оценил никто, показывать
+ * нечего, и тогда лучше чужая цифра, чем пустота.
+ */
+function ratingLine(book: BookBrief): string {
+  if (book.club_ratings > 0 && book.club_score !== null) {
+    const score = (book.club_score / 2).toFixed(1).replace(".", ",");
+    return `★ ${score} в клубе · ${book.club_ratings} оц.`;
+  }
+  if (book.world_rating) {
+    const world = book.world_rating.toFixed(1).replace(".", ",");
+    return `☆ ${world} в мире${
+      book.world_ratings_count ? ` · ${book.world_ratings_count} оц.` : ""
+    }`;
+  }
+  return "";
+}
+
 export function BookRow({
   book,
   onOpen,
@@ -57,6 +77,7 @@ export function BookRow({
         <div className="meta">
           {[book.authors.join(", "), book.year].filter(Boolean).join(" · ") || "—"}
         </div>
+        <div className="meta">{ratingLine(book)}</div>
 
         {/* Клики по кнопкам не должны проваливать в карточку — там свои действия. */}
         <div className="book-actions" onClick={(e) => e.stopPropagation()}>

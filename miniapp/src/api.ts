@@ -100,9 +100,10 @@ export const dismissReminder = (forever: boolean) =>
 
 // --- Книги -------------------------------------------------------------------
 
-export const searchBooks = (q: string, external = true) =>
+export const searchBooks = (q: string, external = true, sort = "new", limit = 30) =>
   request<BookSearch>(
-    `/api/books?q=${encodeURIComponent(q)}&external=${external ? "true" : "false"}`,
+    `/api/books?q=${encodeURIComponent(q)}&external=${external ? "true" : "false"}` +
+      `&sort=${sort}&limit=${limit}`,
   );
 export const getBook = (id: number) => request<BookCard>(`/api/books/${id}`);
 export const ensureBook = (source: string, externalId: string) =>

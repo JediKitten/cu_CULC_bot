@@ -47,6 +47,11 @@ class Book(Base, CreatedAtMixin):
     status: Mapped[BookStatus] = mapped_column(
         enum_col(BookStatus, "book_status"), default=BookStatus.ACTIVE, server_default="active"
     )
+    # Оценка и число оценок во внешних источниках. Клубный рейтинг считается по
+    # своим отметкам и живёт в reading_entries; это — про мир снаружи, и по нему
+    # каталог сортируется, пока своих оценок ещё мало.
+    world_rating: Mapped[float | None]
+    world_ratings_count: Mapped[int | None]
     # Нормализованное «первый автор|название»: нижний регистр, без пунктуации,
     # ё → е, схлопнутые пробелы. Строится в services/books/merge.py.
     dedup_key: Mapped[str] = mapped_column(sa.String(512))

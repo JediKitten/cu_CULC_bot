@@ -25,32 +25,64 @@ from app.services.books.normalize import dedup_key
 router = APIRouter(prefix="/api/books", tags=["books"])
 
 
+# Как сортировать каталог. «Новые» — то, что завели последним; «в клубе» — по
+# своим оценкам; «в мире» — по известности во внешних источниках.
+SORTS = ("new", "club", "world")
+
+
+def _order(sort: str):
+    if sort == "world":
+        # Сначала те, у кого голосов больше: средняя без охвата обманчива —
+        # книга с тремя пятёрками не популярнее той, у которой их тысячи.
+        return (
+            Book.world_ratings_count.desc().nulls_last(),
+            Book.world_rating.desc().nulls_last(),
+        )
+    return (Book.created_at.desc(),)
+
+
 @router.get("", response_model=BookSearchOut)
 async def search_books(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
     q: str = Query(default="", max_length=200),
     external: bool = True,
-    limit: int = Query(default=20, ge=1, le=40),
+    sort: str = Query(default="new"),
+    limit: int = Query(default=20, ge=1, le=100),
 ) -> BookSearchOut:
-    """Поиск. Пустой запрос отдаёт каталог клуба — с него начинается вкладка.
+    """Поиск и каталог.
 
-    Внешние источники подключаются, только когда что-то ищут: показывать
-    человеку миллион чужих книг вместо своей полки бессмысленно.
+    Пустой запрос отдаёт каталог клуба — с него начинается вкладка, и его
+    можно упорядочить по своим оценкам или по мировой известности. Внешние
+    источники подключаются, только когда что-то ищут: показывать человеку
+    миллион чужих книг вместо своей полки бессмысленно.
     """
+    if sort not in SORTS:
+        sort = "new"
+
     if not q.strip():
-        books = list(
-            (
-                await session.execute(
-                    sa.select(Book)
-                    .where(Book.status == BookStatus.ACTIVE)
-                    .order_by(Book.created_at.desc())
-                    .limit(limit)
+        stmt = sa.select(Book).where(Book.status == BookStatus.ACTIVE)
+
+        if sort == "club":
+            # Клубный рейтинг живёт в отметках, а не в самой книге: считаем
+            # его подзапросом, чтобы сортировать в базе, а не в памяти.
+            score = (
+                sa.select(
+                    ReadingEntry.book_id.label("book_id"),
+                    sa.func.avg(ReadingEntry.score).label("avg"),
+                    sa.func.count(ReadingEntry.score).label("votes"),
                 )
+                .where(ReadingEntry.score.is_not(None))
+                .group_by(ReadingEntry.book_id)
+                .subquery()
             )
-            .scalars()
-            .all()
-        )
+            stmt = stmt.join(score, score.c.book_id == Book.id).order_by(
+                score.c.avg.desc(), score.c.votes.desc()
+            )
+        else:
+            stmt = stmt.order_by(*_order(sort))
+
+        books = list((await session.execute(stmt.limit(limit))).scalars().all())
         briefs = [cards.brief_from_book(book) for book in books]
         return BookSearchOut(items=await cards.decorate(session, user.id, briefs))
 

@@ -70,6 +70,10 @@ export type BookBrief = {
   cover_url: string | null;
   source: string | null;
   external_id: string | null;
+  world_rating: number | null;
+  world_ratings_count: number | null;
+  club_score: number | null;
+  club_ratings: number;
   reading_status: ReadingStatus | null;
   my_score: number | null;
   liked: boolean;

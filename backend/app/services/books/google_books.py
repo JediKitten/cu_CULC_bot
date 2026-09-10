@@ -32,16 +32,28 @@ def _cover(links: dict) -> str | None:
     return url.replace("http://", "https://").replace("&edge=curl", "") if url else None
 
 
+def with_subtitle(title: str, subtitle: str | None) -> str:
+    """Приклеивает подзаголовок, если он что-то добавляет.
+
+    У Google Books в этом поле часто лежит описание издания — «роман в
+    четырех частях», «сборник», — и в списке книг оно только шумит. Отличаем
+    по первой букве: настоящий подзаголовок пишут с большой.
+    """
+    subtitle = (subtitle or "").strip()
+    if not subtitle or subtitle[0].islower():
+        return title
+    return f"{title}. {subtitle}"
+
+
 def to_candidate(item: dict) -> BookCandidate | None:
     info = item.get("volumeInfo") or {}
     title = (info.get("title") or "").strip()
     if not title or not item.get("id"):
         return None
-    subtitle = (info.get("subtitle") or "").strip()
     return BookCandidate(
         source=SOURCE,
         external_id=str(item["id"]),
-        title=f"{title}. {subtitle}" if subtitle else title,
+        title=with_subtitle(title, info.get("subtitle")),
         authors=[a for a in (info.get("authors") or []) if a],
         year=year_of(info.get("publishedDate")),
         cover_url=_cover(info.get("imageLinks") or {}),
@@ -50,6 +62,8 @@ def to_candidate(item: dict) -> BookCandidate | None:
         isbn13=_isbn13(info.get("industryIdentifiers") or []),
         language=info.get("language"),
         genres=list(info.get("categories") or []),
+        world_rating=info.get("averageRating"),
+        world_ratings_count=info.get("ratingsCount"),
         payload=item,
     )
 

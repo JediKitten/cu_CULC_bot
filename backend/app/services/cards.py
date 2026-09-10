@@ -88,6 +88,8 @@ def brief_from_book(book: Book) -> BookBrief:
         authors=list(book.authors or []),
         year=book.year,
         cover_url=book.cover_url,
+        world_rating=book.world_rating,
+        world_ratings_count=book.world_ratings_count,
     )
 
 
@@ -98,9 +100,29 @@ def brief_from_candidate(candidate: BookCandidate) -> BookBrief:
         authors=candidate.authors,
         year=candidate.year,
         cover_url=candidate.cover_url,
+        world_rating=candidate.world_rating,
+        world_ratings_count=candidate.world_ratings_count,
         source=candidate.source.value,
         external_id=candidate.external_id,
     )
+
+
+async def club_scores(
+    session: AsyncSession, book_ids: list[int]
+) -> dict[int, tuple[float, int]]:
+    """{book_id: (средняя оценка клуба, сколько оценок)}."""
+    if not book_ids:
+        return {}
+    rows = await session.execute(
+        sa.select(
+            ReadingEntry.book_id,
+            sa.func.avg(ReadingEntry.score),
+            sa.func.count(ReadingEntry.score),
+        )
+        .where(ReadingEntry.book_id.in_(book_ids), ReadingEntry.score.is_not(None))
+        .group_by(ReadingEntry.book_id)
+    )
+    return {book_id: (round(float(avg), 2), count) for book_id, avg, count in rows}
 
 
 async def decorate(
@@ -111,6 +133,7 @@ async def decorate(
     entries = await my_entries(session, user_id, ids)
     demanded = await my_demands(session, user_id, ids)
     counts = await demand_counts(session, ids)
+    club = await club_scores(session, ids)
 
     for brief in briefs:
         if brief.id is None:
@@ -123,6 +146,8 @@ async def decorate(
             brief.favourite_position = entry.favourite_position
         brief.demanded = brief.id in demanded
         brief.demand_count = counts.get(brief.id, (0, 0))[0]
+        if brief.id in club:
+            brief.club_score, brief.club_ratings = club[brief.id]
     return briefs
 
 

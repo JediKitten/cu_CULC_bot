@@ -160,3 +160,31 @@ def test_language_preference_lifts_without_hiding():
 
     assert [c.external_id for c in ordered] == ["g11", "g10", "OL10W"]
     assert len(ordered) == 3  # ничего не потеряли
+
+
+def test_open_library_transliteration_tail_is_dropped():
+    """Open Library пишет «Война и мир / Voĭna i mir» — вторая половина не
+    подзаголовок, а та же строка латиницей."""
+    from app.services.books.open_library import clean_title
+
+    assert clean_title("Война и мир / Voĭna i mir") == "Война и мир"
+    # Настоящее двойное название не трогаем: обе половины на одном языке.
+    assert clean_title("Смерть Ивана Ильича / Крейцерова соната") == (
+        "Смерть Ивана Ильича / Крейцерова соната"
+    )
+    assert clean_title("Notes from Underground / Poor Folk") == (
+        "Notes from Underground / Poor Folk"
+    )
+    assert clean_title("Обломов") == "Обломов"
+
+
+def test_descriptive_subtitles_are_not_glued_to_the_title():
+    """«Идиот. роман в четырех частях» — это описание издания, а не название."""
+    from app.services.books.google_books import with_subtitle
+
+    assert with_subtitle("Идиот", "роман в четырех частях") == "Идиот"
+    assert with_subtitle("Дюна", None) == "Дюна"
+    # Настоящий подзаголовок пишут с большой буквы — его оставляем.
+    assert with_subtitle("Sapiens", "Краткая история человечества") == (
+        "Sapiens. Краткая история человечества"
+    )

@@ -120,6 +120,10 @@ class BookBrief(BaseModel):
     source: str | None = None
     external_id: str | None = None
     # Состояние текущего пользователя — чтобы список рисовался без второго запроса.
+    world_rating: float | None = None
+    world_ratings_count: int | None = None
+    club_score: float | None = None
+    club_ratings: int = 0
     reading_status: ReadingStatus | None = None
     my_score: int | None = None
     liked: bool = False

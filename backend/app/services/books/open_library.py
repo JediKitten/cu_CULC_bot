@@ -29,6 +29,9 @@ FIELDS = ",".join(
         "language",
         "subject",
         "number_of_pages_median",
+        "ratings_average",
+        "ratings_count",
+        "readinglog_count",
     )
 )
 
@@ -38,8 +41,24 @@ def _work_id(key: str | None) -> str | None:
     return key.rsplit("/", 1)[-1] if key else None
 
 
+def clean_title(title: str) -> str:
+    """Убирает транслитерационный хвост.
+
+    Open Library часто хранит название как «Война и мир / Voĭna i mir» —
+    вторая половина здесь не подзаголовок, а та же строка латиницей.
+    Отрезаем её, только когда первая часть кириллическая, а вторая нет:
+    у настоящих двойных названий обе половины на одном языке.
+    """
+    if " / " not in title:
+        return title
+    left, right = title.split(" / ", 1)
+    cyrillic = any("а" <= c.lower() <= "я" for c in left)
+    latin_only = not any("а" <= c.lower() <= "я" for c in right)
+    return left.strip() if cyrillic and latin_only else title
+
+
 def to_candidate(doc: dict) -> BookCandidate | None:
-    title = (doc.get("title") or "").strip()
+    title = clean_title((doc.get("title") or "").strip())
     external_id = _work_id(doc.get("key"))
     if not title or not external_id:
         return None
@@ -61,6 +80,10 @@ def to_candidate(doc: dict) -> BookCandidate | None:
         isbn13=isbn13,
         language=(doc.get("language") or [None])[0],
         genres=list((doc.get("subject") or [])[:8]),
+        world_rating=doc.get("ratings_average"),
+        # Оценок в Open Library мало, а полок — много: если голосов нет,
+        # известность лучше показывает число людей, добавивших книгу себе.
+        world_ratings_count=doc.get("ratings_count") or doc.get("readinglog_count"),
         payload=doc,
     )
 
