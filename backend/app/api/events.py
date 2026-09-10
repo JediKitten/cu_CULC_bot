@@ -24,6 +24,7 @@ from app.schemas import (
 )
 from app.services import eventcards
 from app.services import events as service
+from app.services import people as people_service
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -178,12 +179,17 @@ async def feedback(
 
 
 @router.get("/{event_id}/people")
-async def people(
+async def participants(
     event_id: int,
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[dict]:
-    """Кто идёт. Нужно организатору для ручной отметки присутствия."""
+    """Кто идёт. Нужно организатору для ручной отметки присутствия.
+
+    Функция называется participants, а не people: одноимённый модуль
+    импортирован рядом, и обработчик его затенял — вызов падал в рантайме,
+    а линтер молчал, потому что имя формально было определено.
+    """
     event = await _mine(session, event_id, user, allow_admin=True)
     rows = await session.execute(
         sa.select(Participation.user_id, Participation.state).where(
@@ -191,7 +197,7 @@ async def people(
         )
     )
     found = list(rows)
-    titles = await people.names(session, [user_id for user_id, _ in found])
+    titles = await people_service.names(session, [user_id for user_id, _ in found])
     return sorted(
         (
             {"id": user_id, "name": titles.get(user_id, ""), "state": state.value}

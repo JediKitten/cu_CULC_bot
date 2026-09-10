@@ -19,7 +19,10 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
   const [chosen, setChosen] = useState<number[]>([]);
   const [code, setCode] = useState("");
   const [shownCode, setShownCode] = useState<string | null>(null);
-  const [people, setPeople] = useState<{ id: number; name: string; state: string }[] | null>(null);
+  const [people, setPeople] = useState<{ id: number; name: string; state: string }[] | null>(
+    null,
+  );
+  const [peopleOpen, setPeopleOpen] = useState(false);
 
   useEffect(() => {
     api
@@ -27,6 +30,11 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
       .then((loaded) => {
         setEvent(loaded);
         setChosen(loaded.slots.filter((slot) => slot.my_vote).map((slot) => slot.id));
+        // Список идущих грузим сразу: ведущему он нужен всегда, а отдельная
+        // кнопка «показать» была лишним шагом — и однажды просто не работала.
+        if (loaded.my_event) {
+          api.eventPeople(eventId).then(setPeople).catch(() => setPeople([]));
+        }
       })
       .catch((e) => setError(e.message));
   }, [eventId]);
@@ -249,25 +257,7 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
                     после — чтобы его нельзя было переслать тому, кто не пришёл.
                   </p>
                 )}
-                <button
-                  className="ghost"
-                  style={{ width: "100%", marginTop: 8 }}
-                  onClick={() => api.eventPeople(event.id).then(setPeople)}
-                >
-                  Кто идёт
-                </button>
-                {people?.map((person) => (
-                  <div className="person-row" key={person.id}>
-                    <span style={{ flex: 1 }}>{person.name}</span>
-                    <span className="badge">{person.state}</span>
-                    <button
-                      className="chip"
-                      onClick={() => run(api.attendManual(event.id, person.id))}
-                    >
-                      отметить
-                    </button>
-                  </div>
-                ))}
+
               </div>
             )}
           </>
@@ -298,6 +288,47 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
 
         {event.status === "cancelled" && (
           <p className="notice">Встреча отменена. {event.cancel_reason}</p>
+        )}
+
+        {event.my_event && people !== null && (
+          <section style={{ marginTop: 18 }}>
+            <button
+              className="section__head"
+              onClick={() => setPeopleOpen((open) => !open)}
+              aria-expanded={peopleOpen}
+            >
+              <span className="section__title">
+                Кто идёт
+                <span className="hint"> · {people.filter((p) => p.state === "going").length}</span>
+              </span>
+              <span className={`section__chevron ${peopleOpen ? "is-open" : ""}`} aria-hidden>
+                ▾
+              </span>
+            </button>
+
+            {peopleOpen &&
+              (people.length === 0 ? (
+                <p className="hint">Пока никто не записался.</p>
+              ) : (
+                people.map((person) => (
+                  <div className="person-row" key={person.id}>
+                    <span style={{ flex: 1 }}>{person.name}</span>
+                    <span className="badge">
+                      {{ going: "идёт", declined: "не идёт", waitlist: "в очереди" }[
+                        person.state
+                      ] ?? person.state}
+                    </span>
+                    <button
+                      className="chip"
+                      disabled={busy}
+                      onClick={() => run(api.attendManual(event.id, person.id))}
+                    >
+                      отметить
+                    </button>
+                  </div>
+                ))
+              ))}
+          </section>
         )}
       </div>
     </div>

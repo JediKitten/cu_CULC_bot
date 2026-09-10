@@ -253,3 +253,56 @@ async def test_only_admin_decides_applications(client, session):
         f"/api/applications/{application_id}/withdraw", headers=auth(organizer)
     )
     assert withdrawn.status_code == 204
+
+
+async def test_organizer_sees_who_is_going(client, session):
+    """Список идущих — с именами из анкеты.
+
+    Тест ходит по-настоящему в ручку: она однажды падала в рантайме, потому
+    что обработчик назывался так же, как импортированный рядом модуль, —
+    статические проверки этого не видели.
+    """
+    admin = await member(client, SUPERADMIN_TG_ID, "Оргкомитет Клуба")
+    organizer = await member(client, 2100, "Ведущий Встречи")
+    reader = await member(client, 2101, "Читатель Клуба")
+    book = await make_book(session, "Дом, в котором…", ["Мариам Петросян"])
+
+    application = await client.post(
+        "/api/applications",
+        json={
+            "book_id": book.id,
+            "event_type_id": (await type_ids(client, organizer))[0],
+            "answers": {"read": True, "experience": "Пару раз", "idea": "Про Дом"},
+        },
+        headers=auth(organizer),
+    )
+    approved = await client.post(
+        f"/api/applications/{application.json()['id']}/approve",
+        json={"audience": []},
+        headers=auth(admin),
+    )
+    event_id = approved.json()["event_id"]
+
+    slots = await client.post(
+        f"/api/events/{event_id}/slots",
+        json={"slots": [{"starts_at": "2026-12-01T18:00:00+03:00"}]},
+        headers=auth(organizer),
+    )
+    await client.post(
+        f"/api/events/{event_id}/decide",
+        json={"slot_id": slots.json()["slots"][0]["id"]},
+        headers=auth(organizer),
+    )
+    await client.post(
+        f"/api/events/{event_id}/participation", json={"state": "going"}, headers=auth(reader)
+    )
+
+    people = await client.get(f"/api/events/{event_id}/people", headers=auth(organizer))
+    assert people.status_code == 200, people.text
+    assert people.json() == [
+        {"id": people.json()[0]["id"], "name": "Читатель Клуба", "state": "going"}
+    ]
+
+    # Посторонний список не видит: кто идёт — дело организатора.
+    stranger = await client.get(f"/api/events/{event_id}/people", headers=auth(reader))
+    assert stranger.status_code == 403
