@@ -53,6 +53,12 @@ export function Profile({
     ["submitted", "chat_open"].includes(item.status),
   );
 
+  // Анкета пополнилась после того, как часть людей её уже заполнила: у них
+  // ступень и направление пусты, а заново спрашивать приложение не станет —
+  // анкета формально пройдена. Поэтому напоминаем, но не запираем.
+  const needsStudyInfo =
+    profile?.member_kind === "student" && profile.study_level === null;
+
   return (
     <div className="screen">
       <div className="row" style={{ marginBottom: 12 }}>
@@ -96,6 +102,20 @@ export function Profile({
             <b>{stats.events_attended}</b>
             <span className="meta">встреч посетил</span>
           </div>
+        </div>
+      )}
+
+      {needsStudyInfo && (
+        <div className="notice" style={{ borderColor: "var(--live)" }}>
+          В анкете появились новые вопросы: ступень и направление. Уточните их —
+          это займёт полминуты и поможет собирать встречи под ваш поток.
+          <button
+            className="primary"
+            style={{ marginTop: 8 }}
+            onClick={() => setEditing(true)}
+          >
+            Заполнить
+          </button>
         </div>
       )}
 
