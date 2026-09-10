@@ -22,6 +22,18 @@ class ReadingEntry(Base, CreatedAtMixin):
     __table_args__ = (
         sa.UniqueConstraint("user_id", "book_id", name="uq_reading_entry"),
         sa.CheckConstraint("score IS NULL OR score BETWEEN 1 AND 10", name="score_range"),
+        sa.CheckConstraint(
+            "favourite_position IS NULL OR favourite_position BETWEEN 1 AND 4",
+            name="favourite_position_range",
+        ),
+        # Одно место в витрине занимает ровно одна книга.
+        sa.Index(
+            "uq_favourite_slot",
+            "user_id",
+            "favourite_position",
+            unique=True,
+            postgresql_where=sa.text("favourite_position IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -34,6 +46,11 @@ class ReadingEntry(Base, CreatedAtMixin):
     review: Mapped[str | None] = mapped_column(sa.Text)
     # Отзыв виден другим участникам; закрытый остаётся личной заметкой.
     is_private: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
+    # Лайк — отдельная от оценки вещь: оценка говорит «насколько хорошо», лайк —
+    # «моё». Книгу можно любить, не считая её лучшей, и наоборот.
+    liked: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
+    # Место в четвёрке любимых на витрине профиля: 1..4 или пусто.
+    favourite_position: Mapped[int | None]
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now()
     )

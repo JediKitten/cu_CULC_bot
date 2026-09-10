@@ -34,7 +34,7 @@ async def approved_event(client, session, *, audience: list[str]) -> int:
 
 
 async def test_guest_does_not_see_students_only_event(client, session):
-    event_id = await approved_event(client, session, audience=["student"])
+    event_id = await approved_event(client, session, audience=["bachelor"])
     outsider = await guest(client, 3002, "Гость")
 
     board = (await client.get("/api/board", headers=auth(outsider))).json()
@@ -46,7 +46,7 @@ async def test_guest_does_not_see_students_only_event(client, session):
 
 
 async def test_guest_cannot_vote_or_join_students_only_event(client, session):
-    event_id = await approved_event(client, session, audience=["student"])
+    event_id = await approved_event(client, session, audience=["bachelor"])
     outsider = await guest(client, 3003, "Гость2")
 
     vote = await client.post(
@@ -61,7 +61,7 @@ async def test_guest_cannot_vote_or_join_students_only_event(client, session):
 
 
 async def test_student_sees_students_only_event(client, session):
-    event_id = await approved_event(client, session, audience=["student"])
+    event_id = await approved_event(client, session, audience=["bachelor"])
     student = await member(client, 3004, "Студентка")
 
     board = (await client.get("/api/board", headers=auth(student))).json()

@@ -9,9 +9,7 @@ from app.models.enums import (
     ClubExperience,
     FriendshipStatus,
     MemberKind,
-    Program,
     ReadingPace,
-    StudyLevel,
     UserRole,
     enum_col,
 )
@@ -60,13 +58,6 @@ class Profile(Base):
     user_id: Mapped[int] = mapped_column(sa.ForeignKey("users.id"), primary_key=True)
     member_kind: Mapped[MemberKind] = mapped_column(enum_col(MemberKind, "member_kind"))
     full_name: Mapped[str] = mapped_column(sa.String(128))
-    # Ступень и направление спрашиваем только у студентов, направление —
-    # только у бакалавров. Оба поля выбираются из списка, а не пишутся руками:
-    # свободный текст в «факультете» разъезжался бы на десяток написаний одного
-    # и того же и ломал разрезы в аналитике.
-    study_level: Mapped[StudyLevel | None] = mapped_column(enum_col(StudyLevel, "study_level"))
-    program: Mapped[Program | None] = mapped_column(enum_col(Program, "program"))
-    year: Mapped[int | None]
     university_email: Mapped[str | None] = mapped_column(sa.String(255))
     reading_pace: Mapped[ReadingPace | None] = mapped_column(enum_col(ReadingPace, "reading_pace"))
     club_experience: Mapped[ClubExperience | None] = mapped_column(
@@ -76,7 +67,16 @@ class Profile(Base):
     # Отдельной таблицы не заводим: это ответ анкеты, а не сущность со связями.
     genres: Mapped[list[str]] = mapped_column(ARRAY(sa.String(64)), server_default="{}")
     about: Mapped[str | None] = mapped_column(sa.Text)
+    # Обязательная часть анкеты, её проходят в боте: имя, роль, почта.
     completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # Необязательная часть — вкусы и предпочтения, её заполняют в Mini App.
+    # Проставляется и тогда, когда человек пропустил все вопросы: важен сам
+    # факт, что его спросили и он ответил, — иначе напоминание не унять.
+    preferences_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # «Больше не предупреждать»: насовсем.
+    reminder_dismissed: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
+    # Крестик на плашке: спрятать до следующего запуска бота. Снимает /start.
+    reminder_hidden_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now()
     )

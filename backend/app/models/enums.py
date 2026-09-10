@@ -40,45 +40,26 @@ _ROLE_RANK = {
 
 
 class MemberKind(StrEnum):
-    """Кто человек клубу. Определяет и обязательность вузовской почты,
-    и то, на какие встречи его пускают (см. events.audience)."""
+    """Кто человек клубу.
 
-    STUDENT = "student"
+    Ступень обучения — часть роли, а не отдельное поле: «бакалавр» и
+    «магистрант» это разные ответы на один вопрос, и держать их двумя
+    колонками значило бы позволить состояния вроде «сотрудник-магистрант».
+    """
+
     APPLICANT = "applicant"
+    BACHELOR = "bachelor"
+    MASTER = "master"
     STAFF = "staff"
     GUEST = "guest"
 
 
-# Категории, у которых вузовская почта обязательна: у них она есть по факту,
-# и по ней оргкомитет отличает своих от внешних гостей.
-EMAIL_REQUIRED_KINDS = frozenset({MemberKind.STUDENT, MemberKind.STAFF})
-
-
-class StudyLevel(StrEnum):
-    """Ступень обучения. У магистрантов направление не спрашиваем."""
-
-    BACHELOR = "bachelor"
-    MASTER = "master"
-
-
-class Program(StrEnum):
-    """Направления ЦУ. «Ещё не определился» — только для первокурсников:
-    со второго курса направление уже выбрано, и этот вариант сбивал бы
-    статистику, изображая неопределённость там, где её нет."""
-
-    DEVELOPMENT = "development"
-    AI = "ai"
-    BUSINESS = "business"
-    DESIGN = "design"
-    UNDECIDED = "undecided"
-
-
-# Направление обязательно относится к бакалавриату: у магистрантов его не
-# спрашивают вовсе.
-UNDECIDED_MAX_YEAR = 1
+# Категории, у которых студенческая почта обязательна.
+EMAIL_REQUIRED_KINDS = frozenset({MemberKind.BACHELOR, MemberKind.MASTER})
 
 
 class ReadingPace(StrEnum):
+    NONE = "none"  # вообще не читаю
     RARE = "rare"  # несколько книг в год
     STEADY = "steady"  # книга в месяц
     FAST = "fast"  # несколько книг в месяц
@@ -155,8 +136,11 @@ class DecidedBy(StrEnum):
 
 
 class ParticipationState(StrEnum):
+    """Промежуточного «может быть» нет намеренно: организатору нужно знать,
+    на сколько человек рассчитывать, а «может быть» не отвечает на этот вопрос
+    и лишь размывает кворум."""
+
     GOING = "going"
-    MAYBE = "maybe"
     DECLINED = "declined"
     WAITLIST = "waitlist"
 

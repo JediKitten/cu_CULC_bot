@@ -15,6 +15,8 @@ from app.schemas import (
     BookSearchOut,
     DiaryIn,
     ExternalRef,
+    FavouriteIn,
+    LikeIn,
 )
 from app.services import cards
 from app.services.books import merge
@@ -182,6 +184,81 @@ async def mark_read(
 
     await session.commit()
     await session.refresh(book)
+    return await cards.card(session, user.id, book)
+
+
+async def _entry(session: AsyncSession, user_id: int, book_id: int) -> ReadingEntry:
+    """Строка дневника, создавая её при необходимости.
+
+    Лайк и витрина не требуют отметки о чтении: любить книгу можно и не
+    заводя дневник, и заставлять человека сперва проставить статус —
+    лишний шаг ради стройности модели.
+    """
+    entry = (
+        await session.execute(
+            sa.select(ReadingEntry).where(
+                ReadingEntry.user_id == user_id, ReadingEntry.book_id == book_id
+            )
+        )
+    ).scalar_one_or_none()
+    if entry is None:
+        entry = ReadingEntry(
+            user_id=user_id, book_id=book_id, status=ReadingStatus.WANT_TO_READ
+        )
+        session.add(entry)
+        await session.flush()
+    return entry
+
+
+@router.put("/{book_id}/like", response_model=BookCard)
+async def set_like(
+    book_id: int,
+    body: LikeIn,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> BookCard:
+    book = await session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Книга не найдена")
+    entry = await _entry(session, user.id, book_id)
+    entry.liked = body.liked
+    await session.commit()
+    return await cards.card(session, user.id, book)
+
+
+@router.put("/{book_id}/favourite", response_model=BookCard)
+async def set_favourite(
+    book_id: int,
+    body: FavouriteIn,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> BookCard:
+    """Витрина профиля: до четырёх книг.
+
+    Место занимает ровно одна книга, поэтому занятое сперва освобождается —
+    иначе уникальный индекс отбил бы попытку, и человеку пришлось бы сначала
+    убирать старую книгу вручную.
+    """
+    book = await session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Книга не найдена")
+
+    entry = await _entry(session, user.id, book_id)
+    if body.position is None:
+        entry.favourite_position = None
+    else:
+        await session.execute(
+            sa.update(ReadingEntry)
+            .where(
+                ReadingEntry.user_id == user.id,
+                ReadingEntry.favourite_position == body.position,
+                ReadingEntry.book_id != book_id,
+            )
+            .values(favourite_position=None)
+        )
+        entry.favourite_position = body.position
+        entry.liked = True
+    await session.commit()
     return await cards.card(session, user.id, book)
 
 

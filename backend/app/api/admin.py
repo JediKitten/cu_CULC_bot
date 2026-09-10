@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import RequireAdmin, RequireModerator, RequireSuperadmin
 from app.db import get_session
-from app.models import Book, BookRequest, EventType, MeetingRoom, User
+from app.models import Book, BookRequest, EventType, MeetingRoom, Profile, User
 from app.models.enums import (
     BookStatus,
     EventTypeStatus,
@@ -358,16 +358,20 @@ async def people(
     _: RequireAdmin, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> list[dict]:
     rows = (
-        await session.execute(sa.select(User).order_by(User.display_name))
-    ).scalars()
+        await session.execute(
+            sa.select(User, Profile.full_name)
+            .outerjoin(Profile, Profile.user_id == User.id)
+            .order_by(sa.func.coalesce(Profile.full_name, User.display_name))
+        )
+    ).all()
     return [
         {
             "id": user.id,
-            "name": user.display_name,
+            "name": full_name or user.display_name,
             "username": user.tg_username,
             "role": user.role.value,
         }
-        for user in rows
+        for user, full_name in rows
     ]
 
 

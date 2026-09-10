@@ -32,18 +32,21 @@ async def board(
 
 @router.get("/board/past", response_model=BoardOut)
 async def past(
-    user: CurrentUser, session: Annotated[AsyncSession, Depends(get_session)]
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    attended: bool | None = None,
 ) -> BoardOut:
+    """Прошедшие встречи. attended=true — только те, где человек отметился,
+    false — только те, что прошли мимо него."""
     events = await eventcards.visible_events(
         session, user, (EventStatus.HELD, EventStatus.CANCELLED)
     )
-    return BoardOut(
-        events=[
-            await eventcards.event_out(session, event, user, with_slots=False)
-            for event in events
-        ],
-        demands=[],
-    )
+    cards = [
+        await eventcards.event_out(session, event, user, with_slots=False) for event in events
+    ]
+    if attended is not None:
+        cards = [card for card in cards if card.attended is attended]
+    return BoardOut(events=cards, demands=[])
 
 
 @router.post("/books/{book_id}/demand", status_code=204)

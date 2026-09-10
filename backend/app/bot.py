@@ -17,7 +17,7 @@ import sqlalchemy as sa
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -26,6 +26,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 
+from app.bot_registration import build_router
 from app.config import get_config
 from app.db import SessionLocal
 from app.models import Event, Notification, User
@@ -46,20 +47,10 @@ NOTIFY_INTERVAL_SECONDS = 5
 # в пять минут ничего не пропускает.
 JOBS_INTERVAL_SECONDS = 300
 
-WELCOME = (
-    "<b>Литклуб</b>\n\n"
-    "Здесь живёт читательский дневник и афиша встреч.\n\n"
-    "📚 Отмечайте прочитанное и ставьте оценки.\n"
-    "🙋 На карточке книги жмите «Хочу встречу» и выбирайте формат — балаган, "
-    "круглый стол, детективную студию.\n"
-    "📅 Когда по книге набирается спрос, кто-нибудь берётся её провести — "
-    "и вы выбираете удобное время.\n\n"
-    "Открывайте приложение кнопкой ниже."
-)
-
 HELP = (
     "<b>Что умеет бот</b>\n\n"
     "/app — открыть приложение\n"
+    "/profile — перепройти знакомство (имя, роль, почта)\n"
     "/code XXXX — отметиться на встрече кодом, который называет ведущий\n"
     "/help — эта справка\n\n"
     "Всё остальное — в приложении: книги, дневник, афиша, профиль."
@@ -86,20 +77,9 @@ def app_keyboard(url: str, text: str = "Открыть литклуб") -> Inlin
 
 def build_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher()
-
-    @dispatcher.message(CommandStart())
-    async def start(message: Message) -> None:
-        url = current_miniapp_url()
-        async with SessionLocal() as session:
-            await session.execute(
-                sa.update(User)
-                .where(User.tg_id == message.from_user.id, User.onboarded_at.is_(None))
-                .values(onboarded_at=sa.func.now())
-            )
-            await session.commit()
-        await message.answer(WELCOME, reply_markup=app_keyboard(url) if url else None)
-        if not url:
-            await message.answer(NO_URL)
+    # Знакомство ведёт отдельный роутер: у него своя машина состояний, и
+    # подключать его нужно первым, иначе общие обработчики перехватят ответы.
+    dispatcher.include_router(build_router(current_miniapp_url))
 
     @dispatcher.message(Command("help"))
     async def help_command(message: Message) -> None:

@@ -93,7 +93,7 @@ async def test_full_scenario(client, session):
     # 6. Оргкомитет одобряет — и задаёт аудиторию.
     approved = await client.post(
         f"/api/applications/{application_id}/approve",
-        json={"audience": ["student"], "comment": "Договорились"},
+        json={"audience": ["bachelor"], "comment": "Договорились"},
         headers=auth(admin),
     )
     assert approved.status_code == 200, approved.text
@@ -158,25 +158,22 @@ async def test_full_scenario(client, session):
     )
     assert going.json()["going"] == 1
 
-    code = (await client.get(f"/api/events/{event_id}/code", headers=auth(organizer))).json()
-    attended = await client.post(
-        f"/api/events/{event_id}/attend", json={"code": code["code"]}, headers=auth(reader)
-    )
-    assert attended.status_code == 200
-    assert attended.json()["attended"] is True
+    # Код заранее не выдаём: до встречи ещё месяц, и он бы разошёлся.
+    early = await client.get(f"/api/events/{event_id}/code", headers=auth(organizer))
+    assert early.status_code == 409
+    assert "во время встречи" in early.json()["detail"]
 
-    wrong = await client.post(
-        f"/api/events/{event_id}/attend", json={"code": "ZZZZ"}, headers=auth(organizer)
-    )
-    assert wrong.status_code == 400
+    card = (await client.get(f"/api/events/{event_id}", headers=auth(reader))).json()
+    assert card["code_available"] is False
 
-    # 11. Отзыв о встрече.
+    # 11. Отзыв — только тому, кто был.
     feedback = await client.post(
         f"/api/events/{event_id}/feedback",
         json={"score": 9, "text": "Было живо"},
         headers=auth(reader),
     )
-    assert feedback.json()["my_feedback_score"] == 9
+    assert feedback.status_code == 403
+    assert "были" in feedback.json()["detail"]
 
 
 async def test_demand_without_formats_is_enough(client, session):

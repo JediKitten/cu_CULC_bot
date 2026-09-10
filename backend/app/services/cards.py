@@ -62,6 +62,25 @@ async def my_demands(session: AsyncSession, user_id: int, book_ids: list[int]) -
     return set(rows)
 
 
+async def favourites(session: AsyncSession, user_id: int) -> list[BookBrief]:
+    """Витрина профиля: до четырёх книг в выбранном человеком порядке."""
+    rows = (
+        await session.execute(
+            sa.select(Book, ReadingEntry.favourite_position)
+            .join(ReadingEntry, ReadingEntry.book_id == Book.id)
+            .where(
+                ReadingEntry.user_id == user_id,
+                ReadingEntry.favourite_position.is_not(None),
+            )
+            .order_by(ReadingEntry.favourite_position)
+        )
+    ).all()
+    return [
+        BookBrief(**brief_from_book(book).model_dump() | {"favourite_position": position})
+        for book, position in rows
+    ]
+
+
 def brief_from_book(book: Book) -> BookBrief:
     return BookBrief(
         id=book.id,
@@ -100,6 +119,8 @@ async def decorate(
         if entry is not None:
             brief.reading_status = entry.status
             brief.my_score = entry.score
+            brief.liked = entry.liked
+            brief.favourite_position = entry.favourite_position
         brief.demanded = brief.id in demanded
         brief.demand_count = counts.get(brief.id, (0, 0))[0]
     return briefs
@@ -180,7 +201,14 @@ async def card(session: AsyncSession, user_id: int, book: Book) -> BookCard:
         # Состояние пользователя задаётся ниже явно, поэтому из краткой формы
         # берём только сведения о самой книге.
         **brief_from_book(book).model_dump(
-            exclude={"reading_status", "my_score", "demanded", "demand_count"}
+            exclude={
+                "reading_status",
+                "my_score",
+                "liked",
+                "favourite_position",
+                "demanded",
+                "demand_count",
+            }
         ),
         description=book.description,
         page_count=book.page_count,
@@ -198,6 +226,8 @@ async def card(session: AsyncSession, user_id: int, book: Book) -> BookCard:
         my_demand_type_ids=list(my_types),
         reading_status=entry.status if entry else None,
         my_score=entry.score if entry else None,
+        liked=entry.liked if entry else False,
+        favourite_position=entry.favourite_position if entry else None,
         my_review=entry.review if entry else None,
         my_started_on=entry.started_on if entry else None,
         my_finished_on=entry.finished_on if entry else None,

@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 import sqlalchemy as sa
 
 from app.models import Event, EventSlot, EventType, SlotVote, User
@@ -128,3 +129,40 @@ async def test_reschedule_drops_confirmations(session):
 
     await service.decide(session, event, slot_id=slots[1].id, by=DecidedBy.ORGANIZER)
     assert await service.count_going(session, event.id) == 0
+
+
+async def test_code_only_around_the_meeting(session):
+    """Код называют вслух на встрече. Выдавать его заранее — значит позволить
+    отметиться тому, кто не придёт, а через сутки после — тому, кто не пришёл."""
+    from app.services.events import code_available
+
+    now = datetime.now(UTC)
+    _, slots = await build_event(session, slots=[now])
+    slot = slots[0]
+
+    assert code_available(slot, now) is True
+    assert code_available(slot, now - timedelta(minutes=10)) is True  # чуть раньше начала
+    assert code_available(slot, now - timedelta(hours=2)) is False  # задолго до
+    assert code_available(slot, now + timedelta(hours=4)) is True  # сразу после
+    assert code_available(slot, now + timedelta(days=1)) is False  # на следующий день
+    assert code_available(None, now) is False  # время ещё не назначено
+
+
+async def test_slots_in_the_past_are_rejected(session):
+    """Встречу нельзя назначить вчера — проверка на сервере, а не только
+    в форме: часовой пояс у клиента свой."""
+    from fastapi import HTTPException
+
+    from app.services import events as service
+
+    event, _ = await build_event(session, slots=[])
+    event.status = EventStatus.SLOT_SELECTION
+    await session.commit()
+
+    with pytest.raises(HTTPException) as failure:
+        await service.open_voting(
+            session,
+            event,
+            [{"starts_at": datetime.now(UTC) - timedelta(days=1), "duration_minutes": 120}],
+        )
+    assert "позже" in failure.value.detail

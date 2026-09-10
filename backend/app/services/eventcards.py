@@ -20,7 +20,7 @@ from app.models import (
 )
 from app.models.enums import ApplicationStatus, EventStatus, MemberKind
 from app.schemas import BookBrief, DemandCardOut, DemandTypeCount, EventOut, SlotOut
-from app.services import cards
+from app.services import cards, people
 from app.services import events as events_service
 
 
@@ -58,9 +58,8 @@ async def event_out(
 ) -> EventOut:
     book = await session.get(Book, event.book_id)
     event_type = await session.get(EventType, event.event_type_id)
-    organizer = await session.get(User, event.organizer_user_id)
-
     slot = await session.get(EventSlot, event.slot_id) if event.slot_id else None
+    friends_going, friends_waiting = await events_service.friends_at(session, event, user.id)
     participation = (
         await session.execute(
             sa.select(Participation).where(
@@ -89,7 +88,9 @@ async def event_out(
         event_type_id=event.event_type_id,
         event_type_title=event_type.title if event_type else "",
         organizer_id=event.organizer_user_id,
-        organizer_name=organizer.display_name if organizer else "",
+        # Имя из анкеты, а не ник из Telegram: в клубе люди знают друг друга
+        # по фамилии и имени.
+        organizer_name=await people.name_of(session, event.organizer_user_id),
         title=event.title,
         description=event.description,
         place=slot.place if slot and slot.place else event.place,
@@ -101,10 +102,13 @@ async def event_out(
         duration_minutes=slot.duration_minutes if slot else None,
         slots=await slots_of(session, event.id, user.id) if with_slots else [],
         going=await events_service.count_going(session, event.id),
+        friends_going=friends_going,
+        friends_waiting=friends_waiting,
         my_state=participation.state if participation else None,
         my_event=event.organizer_user_id == user.id,
         attended=attended,
         my_feedback_score=feedback,
+        code_available=events_service.code_available(slot),
         cancel_reason=event.cancel_reason,
     )
 

@@ -8,12 +8,10 @@ from app.models.enums import (
     EventStatus,
     MemberKind,
     ParticipationState,
-    Program,
     ReadingPace,
     ReadingStatus,
     RequestStatus,
     RoomStatus,
-    StudyLevel,
     UserRole,
 )
 
@@ -49,10 +47,8 @@ class EventTypeOut(BaseModel):
 
 class ProfileOut(BaseModel):
     member_kind: MemberKind
+    member_kind_title: str = ""
     full_name: str
-    study_level: StudyLevel | None = None
-    program: Program | None = None
-    year: int | None = None
     university_email: str | None = None
     reading_pace: ReadingPace | None = None
     club_experience: ClubExperience | None = None
@@ -60,16 +56,26 @@ class ProfileOut(BaseModel):
     event_type_ids: list[int] = []
     about: str | None = None
     completed_at: datetime | None = None
+    # Необязательная часть анкеты пройдена (пусть и с пропусками).
+    preferences_at: datetime | None = None
+    # Показывать ли плашку «допройти анкету».
+    needs_preferences: bool = False
     email_required: bool = False
+    favourites: list["BookBrief"] = []
 
 
-class ProfileIn(BaseModel):
+class IdentityIn(BaseModel):
+    """Обязательная часть: её же правят из профиля."""
+
     member_kind: MemberKind
     full_name: str = Field(min_length=1, max_length=128)
-    study_level: StudyLevel | None = None
-    program: Program | None = None
-    year: int | None = Field(default=None, ge=1, le=8)
     university_email: str | None = Field(default=None, max_length=255)
+
+
+class PreferencesIn(BaseModel):
+    """Необязательная часть. Любой вопрос можно пропустить — пустое значение
+    здесь полноценный ответ, а не отсутствие данных."""
+
     reading_pace: ReadingPace | None = None
     club_experience: ClubExperience | None = None
     genres: list[str] = []
@@ -77,11 +83,15 @@ class ProfileIn(BaseModel):
     about: str | None = Field(default=None, max_length=2000)
 
 
-class ProgramOut(BaseModel):
-    key: Program
+class DismissIn(BaseModel):
+    # true — больше не напоминать вовсе; false — спрятать до следующего /start.
+    forever: bool = False
+
+
+class KindOut(BaseModel):
+    key: MemberKind
     title: str
-    # Первокурсникам показываем «ещё не определился», остальным — нет.
-    first_year_only: bool = False
+    email_required: bool = False
 
 
 class ReferenceOut(BaseModel):
@@ -89,7 +99,7 @@ class ReferenceOut(BaseModel):
 
     genres: list[str]
     event_types: list[EventTypeOut]
-    programs: list[ProgramOut] = []
+    kinds: list[KindOut] = []
     # Домен, который принимает почта. Показываем подсказкой в форме, чтобы
     # человек узнавал об ограничении до отправки, а не из ошибки.
     email_domains: list[str] = []
@@ -112,6 +122,8 @@ class BookBrief(BaseModel):
     # Состояние текущего пользователя — чтобы список рисовался без второго запроса.
     reading_status: ReadingStatus | None = None
     my_score: int | None = None
+    liked: bool = False
+    favourite_position: int | None = None
     demanded: bool = False
     demand_count: int = 0
 
@@ -155,6 +167,15 @@ class ExternalRef(BaseModel):
 
     source: str
     external_id: str
+
+
+class LikeIn(BaseModel):
+    liked: bool
+
+
+class FavouriteIn(BaseModel):
+    # 1..4 — место на витрине профиля, пусто — убрать оттуда.
+    position: int | None = Field(default=None, ge=1, le=4)
 
 
 class DiaryIn(BaseModel):
@@ -298,10 +319,16 @@ class EventOut(BaseModel):
     duration_minutes: int | None = None
     slots: list[SlotOut] = []
     going: int = 0
+    # Друзья, которые уже записались или ждут эту встречу: идти куда-то
+    # приятнее, когда знаешь, что там будет свой.
+    friends_going: list[str] = []
+    friends_waiting: list[str] = []
     my_state: ParticipationState | None = None
     my_event: bool = False
     attended: bool = False
     my_feedback_score: int | None = None
+    # Код присутствия показываем только вокруг самой встречи.
+    code_available: bool = False
     cancel_reason: str | None = None
 
 
@@ -342,9 +369,20 @@ class PersonBrief(BaseModel):
     display_name: str
     photo_url: str | None = None
     tg_username: str | None = None
-    program: Program | None = None
     member_kind: MemberKind | None = None
+    member_kind_title: str | None = None
     friendship: str | None = None  # none | outgoing | incoming | friends
+
+
+class PersonProfileOut(BaseModel):
+    """Чужой профиль: то, что человек показывает клубу."""
+
+    person: PersonBrief
+    about: str | None = None
+    favourites: list[BookBrief] = []
+    finished: int = 0
+    events_attended: int = 0
+    genres: list[str] = []
 
 
 class FriendsOut(BaseModel):
@@ -396,3 +434,6 @@ class EventTypeIn(BaseModel):
 
 
 BookCard.model_rebuild()
+
+
+ProfileOut.model_rebuild()

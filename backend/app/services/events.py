@@ -44,6 +44,27 @@ from app.services.settings import SettingsService
 # Статусы, в которых встреча вообще показывается в афише.
 LIVE_STATUSES = (EventStatus.VOTING, EventStatus.SCHEDULED)
 
+# Окно кода присутствия. Раньше открывать незачем — код разошёлся бы до
+# встречи; дольше держать тоже: он для тех, кто пришёл, а не для опоздавших
+# на сутки.
+CODE_OPENS_BEFORE = timedelta(minutes=30)
+CODE_CLOSES_AFTER = timedelta(hours=3)
+
+
+def code_window(slot: "EventSlot | None") -> tuple[datetime, datetime] | None:
+    if slot is None:
+        return None
+    ends_at = slot.starts_at + timedelta(minutes=slot.duration_minutes)
+    return slot.starts_at - CODE_OPENS_BEFORE, ends_at + CODE_CLOSES_AFTER
+
+
+def code_available(slot: "EventSlot | None", now: datetime | None = None) -> bool:
+    window = code_window(slot)
+    if window is None:
+        return False
+    now = now or datetime.now(UTC)
+    return window[0] <= now <= window[1]
+
 
 def visible_to(event: Event, profile: Profile | None, user: User | None = None) -> bool:
     """Пускать ли человека к этой встрече.
@@ -126,6 +147,14 @@ async def open_voting(
         raise HTTPException(status.HTTP_409_CONFLICT, "Окна уже опубликованы")
     if not slots:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужно хотя бы одно окно")
+
+    # Встречу нельзя назначить в прошлом. Проверка на сервере, а не только в
+    # форме: дата приходит от клиента, а часовой пояс у него свой.
+    now = datetime.now(UTC)
+    if any(slot["starts_at"] <= now for slot in slots):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Время встречи должно быть позже сегодняшнего дня"
+        )
 
     settings = SettingsService(session)
     days = vote_days or await settings.get("vote_days")
@@ -318,6 +347,13 @@ def make_code() -> str:
 
 
 async def rotate_code(session: AsyncSession, event: Event) -> str:
+    slot = await session.get(EventSlot, event.slot_id) if event.slot_id else None
+    if not code_available(slot):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Код доступен только во время встречи — за полчаса до начала и "
+            "несколько часов после.",
+        )
     settings = SettingsService(session)
     ttl = timedelta(minutes=await settings.get("attendance_code_ttl_minutes"))
     now = datetime.now(UTC)
@@ -327,6 +363,61 @@ async def rotate_code(session: AsyncSession, event: Event) -> str:
     event.code_rotated_at = now
     await session.commit()
     return event.attendance_code
+
+
+async def friends_at(
+    session: AsyncSession, event: Event, user_id: int
+) -> tuple[list[str], list[str]]:
+    """Друзья, которые идут на встречу и которые ждали её по книге.
+
+    Идти куда-то приятнее, когда знаешь, что там будет свой, — а спрос по
+    книге показывает интерес даже до записи.
+    """
+    from app.models import Friendship
+    from app.models.enums import FriendshipStatus
+    from app.services import people
+
+    pairs = await session.execute(
+        sa.select(Friendship.from_user_id, Friendship.to_user_id).where(
+            Friendship.status == FriendshipStatus.ACCEPTED,
+            sa.or_(Friendship.from_user_id == user_id, Friendship.to_user_id == user_id),
+        )
+    )
+    friend_ids = {a if b == user_id else b for a, b in pairs}
+    if not friend_ids:
+        return [], []
+
+    going = set(
+        (
+            await session.execute(
+                sa.select(Participation.user_id).where(
+                    Participation.event_id == event.id,
+                    Participation.user_id.in_(friend_ids),
+                    Participation.state == ParticipationState.GOING,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    waiting = set(
+        (
+            await session.execute(
+                sa.select(Demand.user_id).where(
+                    Demand.book_id == event.book_id,
+                    Demand.user_id.in_(friend_ids),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    ) - going
+
+    titles = await people.names(session, list(going | waiting))
+    return (
+        sorted(titles[i] for i in going if i in titles),
+        sorted(titles[i] for i in waiting if i in titles),
+    )
 
 
 async def mark_attendance(

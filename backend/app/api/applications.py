@@ -10,7 +10,7 @@ from app.models import Book, Event, EventType, MeetingRoom, OrganizerApplication
 from app.models.enums import ApplicationStatus, MemberKind
 from app.schemas import ApplicationIn, ApplicationOut, ApproveIn, RejectIn
 from app.services import applications as service
-from app.services import cards
+from app.services import cards, people
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -153,7 +153,7 @@ async def out(session: AsyncSession, application: OrganizerApplication) -> Appli
         id=application.id,
         book=cards.brief_from_book(book) if book else None,
         user_id=application.user_id,
-        user_name=user.display_name if user else "",
+        user_name=await people.name_of(session, application.user_id),
         user_username=user.tg_username if user else None,
         event_type_id=application.event_type_id,
         event_type_title=event_type.title if event_type else None,

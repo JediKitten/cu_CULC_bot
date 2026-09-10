@@ -11,8 +11,8 @@ from app.core.auth import CurrentUser
 from app.db import get_session
 from app.models import Friendship, Profile, User
 from app.models.enums import FriendshipStatus, NotificationKind
-from app.schemas import FriendsOut, PersonBrief
-from app.services import notify
+from app.schemas import FriendsOut, PersonBrief, PersonProfileOut
+from app.services import cards, notify, profiles
 
 router = APIRouter(prefix="/api/friends", tags=["friends"])
 
@@ -41,12 +41,59 @@ async def _brief(session: AsyncSession, person: User, me: int) -> PersonBrief:
     profile = await session.get(Profile, person.id)
     return PersonBrief(
         id=person.id,
-        display_name=person.display_name,
+        # Фамилия и имя из анкеты: ник в Telegram у людей стоит какой угодно,
+        # а в клубе друг друга знают по имени.
+        display_name=(profile.full_name if profile else None) or person.display_name,
         photo_url=person.photo_url,
         tg_username=person.tg_username,
-        program=profile.program if profile else None,
         member_kind=profile.member_kind if profile else None,
+        member_kind_title=(
+            profiles.KIND_TITLES.get(profile.member_kind) if profile else None
+        ),
         friendship=await _relation(session, me, person.id),
+    )
+
+
+@router.get("/{user_id}/profile", response_model=PersonProfileOut)
+async def person_profile(
+    user_id: int,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PersonProfileOut:
+    """Чужой профиль: витрина любимых книг и немного цифр.
+
+    Открыт всем участникам клуба, а не только друзьям: люди приходят сюда
+    именно знакомиться, и закрытый профиль этому мешает.
+    """
+    person = await session.get(User, user_id)
+    profile = await session.get(Profile, user_id)
+    if person is None or profile is None or profile.completed_at is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Участник не найден")
+
+    from app.models import Attendance, ReadingEntry
+    from app.models.enums import ReadingStatus
+
+    finished = (
+        await session.execute(
+            sa.select(sa.func.count()).where(
+                ReadingEntry.user_id == user_id,
+                ReadingEntry.status == ReadingStatus.FINISHED,
+            )
+        )
+    ).scalar_one()
+    attended = (
+        await session.execute(
+            sa.select(sa.func.count()).where(Attendance.user_id == user_id)
+        )
+    ).scalar_one()
+
+    return PersonProfileOut(
+        person=await _brief(session, person, user.id),
+        about=profile.about,
+        favourites=await cards.favourites(session, user_id),
+        finished=finished,
+        events_attended=attended,
+        genres=list(profile.genres or []),
     )
 
 

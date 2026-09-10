@@ -26,7 +26,7 @@ from app.models import (
     User,
 )
 from app.models.enums import ApplicationStatus, EventStatus, ParticipationState
-from app.services.reference import program_title
+from app.services.profiles import KIND_TITLES
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -147,36 +147,31 @@ async def by_type(
     ]
 
 
-@router.get("/by-program")
-async def by_program(
+@router.get("/by-kind")
+async def by_kind(
     _: RequireAdmin, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> list[dict]:
-    """Разрез по направлениям и категориям участников: кто вообще в клубе
-    и кто до встреч доходит."""
+    """Разрез по ролям: кто в клубе и кто доходит до встреч."""
     rows = await session.execute(
         sa.select(
-            Profile.program,
             Profile.member_kind,
-            Profile.study_level,
             sa.func.count(sa.distinct(User.id)),
             sa.func.count(sa.distinct(Attendance.id)),
         )
         .select_from(Profile)
         .join(User, User.id == Profile.user_id)
         .outerjoin(Attendance, Attendance.user_id == User.id)
-        .group_by(Profile.program, Profile.member_kind, Profile.study_level)
+        .group_by(Profile.member_kind)
         .order_by(sa.desc(sa.func.count(sa.distinct(User.id))))
     )
     return [
         {
-            "program": program.value if program else None,
-            "program_title": program_title(program.value if program else None) or "—",
             "member_kind": kind.value if kind else None,
-            "study_level": level.value if level else None,
+            "title": KIND_TITLES.get(kind, "—"),
             "people": people,
             "attendances": attendances,
         }
-        for program, kind, level, people, attendances in rows
+        for kind, people, attendances in rows
     ]
 
 
@@ -186,13 +181,15 @@ async def organizers(
 ) -> list[dict]:
     rows = await session.execute(
         sa.select(
-            User.display_name,
+            sa.func.coalesce(Profile.full_name, User.display_name),
             sa.func.count(sa.distinct(Event.id)),
             sa.func.avg(EventFeedback.score),
         )
+        .select_from(User)
+        .outerjoin(Profile, Profile.user_id == User.id)
         .join(Event, Event.organizer_user_id == User.id)
         .outerjoin(EventFeedback, EventFeedback.event_id == Event.id)
-        .group_by(User.display_name)
+        .group_by(Profile.full_name, User.display_name)
         .order_by(sa.desc(sa.func.count(sa.distinct(Event.id))))
     )
     return [

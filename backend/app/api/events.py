@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, RequireAdmin
 from app.db import get_session
-from app.models import Event, EventFeedback, Participation, User
+from app.models import Attendance, Event, EventFeedback, Participation, User
 from app.models.enums import (
     AttendanceMethod,
     DecidedBy,
@@ -148,6 +148,19 @@ async def feedback(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EventOut:
     event = await service.require_visible(session, event_id, user)
+
+    was_there = (
+        await session.execute(
+            sa.select(Attendance.id).where(
+                Attendance.event_id == event.id, Attendance.user_id == user.id
+            )
+        )
+    ).scalar_one_or_none() is not None
+    if not was_there:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Оценить можно встречу, на которой вы были"
+        )
+
     row = (
         await session.execute(
             sa.select(EventFeedback).where(
@@ -173,15 +186,19 @@ async def people(
     """Кто идёт. Нужно организатору для ручной отметки присутствия."""
     event = await _mine(session, event_id, user, allow_admin=True)
     rows = await session.execute(
-        sa.select(User, Participation.state)
-        .join(Participation, Participation.user_id == User.id)
-        .where(Participation.event_id == event.id)
-        .order_by(User.display_name)
+        sa.select(Participation.user_id, Participation.state).where(
+            Participation.event_id == event.id
+        )
     )
-    return [
-        {"id": person.id, "name": person.display_name, "state": state.value}
-        for person, state in rows
-    ]
+    found = list(rows)
+    titles = await people.names(session, [user_id for user_id, _ in found])
+    return sorted(
+        (
+            {"id": user_id, "name": titles.get(user_id, ""), "state": state.value}
+            for user_id, state in found
+        ),
+        key=lambda row: row["name"],
+    )
 
 
 @router.post("/{event_id}/cancel", response_model=EventOut)

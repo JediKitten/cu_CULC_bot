@@ -133,7 +133,7 @@ async def login(client, tg_id: int, name: str) -> str:
     return response.json()["token"]
 
 
-# Почта ЦУ: единственный домен, который принимает анкета.
+# Студенческая почта: единственный домен, который принимает анкета.
 CU_EMAIL = "student@edu.centraluniversity.ru"
 
 
@@ -141,26 +141,18 @@ async def onboard(
     client,
     token: str,
     *,
-    member_kind: str = "student",
+    member_kind: str = "bachelor",
     email: str | None = CU_EMAIL,
     full_name: str = "Тестовый Участник",
-    study_level: str | None = "bachelor",
-    program: str | None = "development",
-    year: int | None = 2,
 ) -> dict:
+    """Обязательная часть анкеты. В жизни её проходят в боте, но правила
+    одни и те же, и ручка правки принимает ровно те же поля."""
     response = await client.put(
-        "/api/profile",
+        "/api/profile/identity",
         json={
             "member_kind": member_kind,
             "full_name": full_name,
-            "study_level": study_level,
-            "program": program,
-            "year": year,
             "university_email": email,
-            "reading_pace": "steady",
-            "club_experience": "visitor",
-            "genres": ["Классика"],
-            "event_type_ids": [],
         },
         headers=auth(token),
     )
@@ -169,25 +161,47 @@ async def onboard(
 
 
 async def member(client, tg_id: int, name: str, **kwargs) -> str:
-    """Вошедший участник с заполненной анкетой — то, с чего начинается
+    """Вошедший участник с пройденной регистрацией — то, с чего начинается
     большинство сценариев."""
     token = await login(client, tg_id, name)
-    await onboard(client, token, full_name=name, **kwargs)
+    await register(client, token, full_name=name, **kwargs)
     return token
 
 
-async def guest(client, tg_id: int, name: str) -> str:
-    """Внешний гость: ни почты, ни ступени, ни курса."""
-    return await member(
-        client,
-        tg_id,
-        name,
-        member_kind="guest",
-        email=None,
-        study_level=None,
-        program=None,
-        year=None,
+async def register(
+    client,
+    token: str,
+    *,
+    member_kind: str = "bachelor",
+    email: str | None = CU_EMAIL,
+    full_name: str = "Тестовый Участник",
+) -> dict:
+    """Первичная регистрация. В боте её ведёт диалог, здесь — прямой вызов
+    того же сервиса через приложение."""
+    import jwt
+
+    from app.config import get_config
+    from app.core.auth import ALGORITHM
+    from app.db import get_session
+    from app.main import app
+    from app.models.enums import MemberKind
+    from app.services import profiles
+
+    payload = jwt.decode(token, get_config().secret_key, algorithms=[ALGORITHM])
+    session = app.dependency_overrides[get_session]()
+    await profiles.register(
+        session,
+        int(payload["sub"]),
+        full_name=full_name,
+        member_kind=MemberKind(member_kind),
+        university_email=email,
     )
+    return {"full_name": full_name}
+
+
+async def guest(client, tg_id: int, name: str) -> str:
+    """Внешний гость: почта не нужна."""
+    return await member(client, tg_id, name, member_kind="guest", email=None)
 
 
 def auth(token: str) -> dict[str, str]:

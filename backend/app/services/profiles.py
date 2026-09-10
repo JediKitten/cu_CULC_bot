@@ -1,14 +1,10 @@
 """Анкета и профиль.
 
-Здесь же живут все правила, которые нельзя выразить схемой:
-
-* почта ЦУ обязательна студентам и сотрудникам и проверяется по домену;
-* ступень обучения спрашивают только у студентов;
-* направление — только у бакалавров, магистрантам его не задают вовсе;
-* «ещё не определился» доступно только первокурсникам.
-
-Правила одни и те же при первом заполнении и при правке профиля: сменил
-«гостя» на «студента», не вписав почту, — сохранение не проходит.
+Анкета делится надвое. Обязательную часть — имя, роль, почта — человек
+проходит в боте: без неё в клубе делать нечего, и спрашивать её в Mini App
+значило бы пускать внутрь того, о ком ничего не известно. Необязательную —
+вкусы и предпочтения — предлагают уже в приложении, и любой вопрос можно
+пропустить: неотвеченный вопрос честнее выдуманного ответа.
 """
 
 import re
@@ -20,137 +16,184 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Profile, ProfileEventType
 from app.models.demand import EventType
-from app.models.enums import (
-    EMAIL_REQUIRED_KINDS,
-    UNDECIDED_MAX_YEAR,
-    EventTypeStatus,
-    MemberKind,
-    Program,
-    StudyLevel,
-)
+from app.models.enums import EMAIL_REQUIRED_KINDS, EventTypeStatus, MemberKind
 from app.services.reference import clean_genres
 
-# Домен почты ЦУ. Вынесен в константу: если у сотрудников адреса окажутся
-# в другом домене, править нужно будет ровно здесь.
+# Домен студенческой почты ЦУ. Вынесен в константу: если появится второй
+# домен, править нужно будет ровно здесь.
 CU_EMAIL_DOMAINS = ("edu.centraluniversity.ru",)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 DOMAINS_HUMAN = " или ".join(f"@{domain}" for domain in CU_EMAIL_DOMAINS)
-NEED_EMAIL = f"Нужна почта ЦУ в домене {DOMAINS_HUMAN}"
+NEED_EMAIL = f"Нужна студенческая почта в домене {DOMAINS_HUMAN}"
 BAD_EMAIL = "Похоже, это не адрес почты"
-WRONG_DOMAIN = f"Принимается только почта ЦУ: {DOMAINS_HUMAN}"
-NEED_NAME = "Как вас зовут?"
-NEED_LEVEL = "Выберите ступень: бакалавриат или магистратура"
-NEED_PROGRAM = "Выберите направление"
-UNDECIDED_ONLY_FIRST_YEAR = (
-    "«Ещё не определился» — только для первого курса. Со второго направление уже выбрано."
-)
+WRONG_DOMAIN = f"Принимается только студенческая почта ЦУ: {DOMAINS_HUMAN}"
+NEED_NAME = "Напишите фамилию и имя"
+
+# Подписи ролей. Здесь же, а не в интерфейсе: их показывает и бот, и Mini App,
+# и оргкомитет читает те же слова в аналитике.
+KIND_TITLES: dict[MemberKind, str] = {
+    MemberKind.APPLICANT: "Абитуриент",
+    MemberKind.BACHELOR: "Бакалавр",
+    MemberKind.MASTER: "Магистрант",
+    MemberKind.STAFF: "Сотрудник",
+    MemberKind.GUEST: "Внешний гость",
+}
 
 
 def email_required(kind: MemberKind) -> bool:
     return kind in EMAIL_REQUIRED_KINDS
 
 
-def check_email(kind: MemberKind, email: str | None) -> str | None:
-    """Возвращает нормализованную почту либо поднимает 400 с человеческим текстом."""
+class ProfileError(ValueError):
+    """Ответ не подошёл. Текст показываем человеку как есть — и в боте, и в API."""
+
+
+def clean_name(full_name: str | None) -> str:
+    name = " ".join((full_name or "").split())
+    if len(name) < 2:
+        raise ProfileError(NEED_NAME)
+    return name[:128]
+
+
+def clean_email(kind: MemberKind, email: str | None) -> str | None:
     email = (email or "").strip().lower() or None
 
     if email is None:
         if email_required(kind):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, NEED_EMAIL)
+            raise ProfileError(NEED_EMAIL)
         return None
 
     if not EMAIL_RE.match(email):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, BAD_EMAIL)
-
-    domain = email.rsplit("@", 1)[1]
-    if domain not in CU_EMAIL_DOMAINS:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, WRONG_DOMAIN)
+        raise ProfileError(BAD_EMAIL)
+    if email.rsplit("@", 1)[1] not in CU_EMAIL_DOMAINS:
+        raise ProfileError(WRONG_DOMAIN)
     return email
 
 
-def check_study(
-    kind: MemberKind,
-    study_level: StudyLevel | None,
-    program: Program | None,
-    year: int | None,
-) -> tuple[StudyLevel | None, Program | None, int | None]:
-    """Согласует ступень, направление и курс.
-
-    Возвращает их приведёнными к тому виду, в котором они осмысленны: у всех,
-    кроме студентов, ступени и направления нет, у магистрантов нет направления.
-    Лишнее не отвергаем с ошибкой, а обнуляем — иначе клиент, приславший старое
-    значение вместе с новой категорией, получал бы отказ там, где всё понятно.
-    """
-    if kind is not MemberKind.STUDENT:
-        return None, None, None
-
-    if study_level is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, NEED_LEVEL)
-
-    if study_level is StudyLevel.MASTER:
-        # Магистрантов о направлении не спрашиваем вовсе.
-        return study_level, None, year
-
-    if program is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, NEED_PROGRAM)
-    if program is Program.UNDECIDED and (year or 0) > UNDECIDED_MAX_YEAR:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, UNDECIDED_ONLY_FIRST_YEAR)
-    return study_level, program, year
-
-
-def validate(kind: MemberKind, full_name: str | None, email: str | None) -> str | None:
-    if not (full_name or "").strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, NEED_NAME)
-    return check_email(kind, email)
-
-
-async def save(
+async def register(
     session: AsyncSession,
     user_id: int,
     *,
-    member_kind: MemberKind,
     full_name: str,
-    study_level: StudyLevel | None,
-    program: Program | None,
-    year: int | None,
+    member_kind: MemberKind,
     university_email: str | None,
-    reading_pace,
-    club_experience,
-    genres: list[str] | None,
-    event_type_ids: list[int] | None,
-    about: str | None,
 ) -> Profile:
-    """Создаёт или обновляет анкету. Первое успешное сохранение проставляет
-    completed_at — именно оно открывает человеку остальное приложение."""
-    email = validate(member_kind, full_name, university_email)
-    study_level, program, year = check_study(member_kind, study_level, program, year)
+    """Обязательная часть анкеты. Её принимает бот.
+
+    Повторный проход не сбрасывает предпочтения: человек может вернуться и
+    поправить роль или фамилию, не теряя всего остального.
+    """
+    name = clean_name(full_name)
+    email = clean_email(member_kind, university_email)
 
     profile = await session.get(Profile, user_id)
     if profile is None:
         profile = Profile(user_id=user_id)
         session.add(profile)
 
+    profile.full_name = name
     profile.member_kind = member_kind
-    profile.full_name = full_name.strip()
-    profile.study_level = study_level
-    profile.program = program
-    profile.year = year
     profile.university_email = email
+    profile.updated_at = datetime.now(UTC)
+    if profile.completed_at is None:
+        profile.completed_at = datetime.now(UTC)
+
+    await session.commit()
+    await session.refresh(profile)
+    return profile
+
+
+async def save_preferences(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    reading_pace=None,
+    club_experience=None,
+    genres: list[str] | None = None,
+    event_type_ids: list[int] | None = None,
+    about: str | None = None,
+) -> Profile:
+    """Необязательная часть. Любой вопрос можно пропустить — тогда поле
+    остаётся пустым, и это нормальный ответ, а не ошибка.
+
+    preferences_at проставляется в любом случае: важен факт, что человека
+    спросили и он ответил, — иначе напоминание нечем унять.
+    """
+    profile = await session.get(Profile, user_id)
+    if profile is None or profile.completed_at is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Сначала пройдите регистрацию в боте")
+
     profile.reading_pace = reading_pace
     profile.club_experience = club_experience
     profile.genres = clean_genres(genres)
     profile.about = (about or "").strip() or None
+    profile.preferences_at = datetime.now(UTC)
     profile.updated_at = datetime.now(UTC)
-    if profile.completed_at is None:
-        profile.completed_at = datetime.now(UTC)
 
     await session.flush()
     await set_event_types(session, user_id, event_type_ids or [])
     await session.commit()
     await session.refresh(profile)
     return profile
+
+
+async def update_identity(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    full_name: str,
+    member_kind: MemberKind,
+    university_email: str | None,
+) -> Profile:
+    """Правка обязательной части из приложения. Правила те же, что в боте:
+    сменил роль на студенческую без почты — сохранение не проходит."""
+    try:
+        return await register(
+            session,
+            user_id,
+            full_name=full_name,
+            member_kind=member_kind,
+            university_email=university_email,
+        )
+    except ProfileError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+async def dismiss_reminder(session: AsyncSession, user_id: int, *, forever: bool) -> None:
+    """Плашка «допройти анкету»: спрятать до следующего запуска бота или
+    насовсем. Временное скрытие снимает /start — так человек, который просто
+    отмахнулся, увидит напоминание ещё раз, а тот, кто отказался, не увидит."""
+    profile = await session.get(Profile, user_id)
+    if profile is None:
+        return
+    if forever:
+        profile.reminder_dismissed = True
+    else:
+        profile.reminder_hidden_at = datetime.now(UTC)
+    await session.commit()
+
+
+async def unhide_reminder(session: AsyncSession, user_id: int) -> None:
+    """Снимает временное скрытие. Зовётся из /start."""
+    await session.execute(
+        sa.update(Profile)
+        .where(Profile.user_id == user_id, Profile.reminder_dismissed.is_(False))
+        .values(reminder_hidden_at=None)
+    )
+    await session.commit()
+
+
+def needs_preferences(profile: Profile | None) -> bool:
+    """Показывать ли плашку «допройти анкету»."""
+    if profile is None or profile.completed_at is None:
+        return False
+    return (
+        profile.preferences_at is None
+        and not profile.reminder_dismissed
+        and profile.reminder_hidden_at is None
+    )
 
 
 async def set_event_types(session: AsyncSession, user_id: int, ids: list[int]) -> None:
