@@ -131,6 +131,10 @@ async def retitle() -> tuple[int, int]:
             if not found:
                 continue
 
+            # Оставляем ту запись, чьё название ближе к выверенному: у неё же
+            # обычно и данные чище. «Большие надежды» лучше, чем «Большие
+            # надежды. Книги о любви».
+            found.sort(key=lambda book: (book.title != title, len(book.title)))
             keeper, *duplicates = found
             key = dedup_key(title, [author])
 
@@ -149,6 +153,12 @@ async def retitle() -> tuple[int, int]:
                 by_id.pop(extra.id, None)
                 merged += 1
                 logger.info("− склеен дубль: %s", extra.title)
+
+            # Удаление сбрасываем до переименования: в одном сбросе SQLAlchemy
+            # выполняет UPDATE раньше DELETE, и новый ключ натыкался бы на
+            # ещё живой дубль.
+            if duplicates:
+                await session.flush()
 
             if keeper.title == title and (keeper.authors or [None])[0] == author:
                 continue
