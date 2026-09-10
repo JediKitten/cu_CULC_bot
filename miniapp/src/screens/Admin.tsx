@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
-import { audienceLabel, kindLabel } from "../labels";
+import { audienceLabel } from "../labels";
 import type { Application, BookRequest, MemberKind, Room, Setting } from "../types";
 
-const KINDS: MemberKind[] = ["student", "applicant", "staff", "guest"];
+const KINDS: MemberKind[] = ["applicant", "bachelor", "master", "staff", "guest"];
 const TABS = ["Заявки", "Книги", "Переговорки", "Роли", "Настройки", "Аналитика"] as const;
 
 const ROLES: { key: string; title: string; hint: string }[] = [
@@ -445,14 +445,14 @@ function Analytics() {
     { type: string; events: number; attendances: number; avg_score: number | null }[]
   >([]);
   const [programs, setPrograms] = useState<
-    { program_title: string; member_kind: string | null; people: number; attendances: number }[]
+    { title: string; member_kind: string | null; people: number; attendances: number }[]
   >([]);
 
   useEffect(() => {
     api.funnel().then(setFunnel);
     api.unmetDemand().then(setUnmet);
     api.byType().then(setTypes);
-    api.byProgram().then(setPrograms);
+    api.byKind().then(setPrograms);
   }, []);
 
   const labels: Record<string, string> = {
@@ -486,12 +486,11 @@ function Analytics() {
         </div>
       ))}
 
-      <h2>По направлениям</h2>
+      <h2>Кто в клубе</h2>
       <table>
         <thead>
           <tr>
-            <th>Направление</th>
-            <th>Кто</th>
+            <th>Роль</th>
             <th>Людей</th>
             <th>Посещений</th>
           </tr>
@@ -499,8 +498,7 @@ function Analytics() {
         <tbody>
           {programs.map((row, index) => (
             <tr key={index}>
-              <td>{row.program_title}</td>
-              <td>{row.member_kind ? kindLabel(row.member_kind) : "—"}</td>
+              <td>{row.title}</td>
               <td>{row.people}</td>
               <td>{row.attendances}</td>
             </tr>

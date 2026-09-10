@@ -10,6 +10,7 @@ import type {
   Friends,
   MyStats,
   PersonBrief,
+  PersonProfile,
   Profile,
   Reference,
   Room,
@@ -82,7 +83,20 @@ export const me = () => request<User>("/api/auth/me");
 
 export const reference = () => request<Reference>("/api/profile/reference");
 export const getProfile = () => request<Profile | null>("/api/profile");
-export const saveProfile = (body: Partial<Profile>) => put<Profile>("/api/profile", body);
+export const saveIdentity = (body: {
+  member_kind: string;
+  full_name: string;
+  university_email: string | null;
+}) => put<Profile>("/api/profile/identity", body);
+export const savePreferences = (body: {
+  reading_pace?: string | null;
+  club_experience?: string | null;
+  genres?: string[];
+  event_type_ids?: number[];
+  about?: string | null;
+}) => put<Profile>("/api/profile/preferences", body);
+export const dismissReminder = (forever: boolean) =>
+  post<void>("/api/profile/dismiss-reminder", { forever });
 
 // --- Книги -------------------------------------------------------------------
 
@@ -94,6 +108,10 @@ export const getBook = (id: number) => request<BookCard>(`/api/books/${id}`);
 export const ensureBook = (source: string, externalId: string) =>
   post<BookCard>("/api/books/ensure", { source, external_id: externalId });
 export const markRead = (id: number) => post<BookCard>(`/api/books/${id}/read`);
+export const setLike = (id: number, liked: boolean) =>
+  put<BookCard>(`/api/books/${id}/like`, { liked });
+export const setFavourite = (id: number, position: number | null) =>
+  put<BookCard>(`/api/books/${id}/favourite`, { position });
 export const saveDiary = (id: number, body: unknown) =>
   put<BookCard>(`/api/books/${id}/diary`, body);
 export const dropDiary = (id: number) => del<BookCard>(`/api/books/${id}/diary`);
@@ -102,7 +120,10 @@ export const requestBook = (body: unknown) => post<BookRequest>("/api/books/requ
 // --- Спрос и афиша -----------------------------------------------------------
 
 export const board = () => request<Board>("/api/board");
-export const pastBoard = () => request<Board>("/api/board/past");
+export const pastBoard = (attended?: boolean) =>
+  request<Board>(
+    `/api/board/past${attended === undefined ? "" : `?attended=${attended}`}`,
+  );
 export const addDemand = (bookId: number, eventTypeIds: number[], comment?: string) =>
   post<void>(`/api/books/${bookId}/demand`, {
     event_type_ids: eventTypeIds,
@@ -159,6 +180,8 @@ export const friends = () => request<Friends>("/api/friends");
 export const searchPeople = (q: string) =>
   request<PersonBrief[]>(`/api/friends/search?q=${encodeURIComponent(q)}`);
 export const addFriend = (id: number) => post<PersonBrief>(`/api/friends/${id}`);
+export const personProfile = (id: number) =>
+  request<PersonProfile>(`/api/friends/${id}/profile`);
 export const dropFriend = (id: number) => del<void>(`/api/friends/${id}`);
 
 // --- Админка -----------------------------------------------------------------
@@ -198,14 +221,7 @@ export const byType = () =>
       avg_score: number | null;
     }[]
   >("/api/analytics/by-type");
-export const byProgram = () =>
+export const byKind = () =>
   request<
-    {
-      program: string | null;
-      program_title: string;
-      member_kind: string | null;
-      study_level: string | null;
-      people: number;
-      attendances: number;
-    }[]
-  >("/api/analytics/by-program");
+    { member_kind: string | null; title: string; people: number; attendances: number }[]
+  >("/api/analytics/by-kind");

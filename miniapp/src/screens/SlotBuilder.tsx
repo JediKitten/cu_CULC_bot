@@ -6,6 +6,17 @@ type Draft = { starts_at: string; duration_minutes: number; place: string; note:
 
 const EMPTY: Draft = { starts_at: "", duration_minutes: 120, place: "", note: "" };
 
+/** Ближайшее допустимое время — завтрашняя полночь в местной зоне.
+ * Встречу, назначенную на сегодня, всё равно не успеют увидеть. */
+function earliest(): string {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(0, 0, 0, 0);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
+}
+
 /** Форма окон для организатора.
  *
  * Окон просим несколько: смысл голосования в том, чтобы выбрать из
@@ -89,6 +100,7 @@ export function SlotBuilder({
             <span>Дата и время</span>
             <input
               type="datetime-local"
+              min={earliest()}
               value={draft.starts_at}
               onChange={(e) => patch(index, { starts_at: e.target.value })}
             />
@@ -111,14 +123,13 @@ export function SlotBuilder({
               />
             </label>
           </div>
-          {drafts.length > 1 && (
-            <button
-              className="ghost danger"
-              onClick={() => setDrafts((rows) => rows.filter((_, i) => i !== index))}
-            >
-              Убрать окно
-            </button>
-          )}
+          <button
+            className="ghost danger"
+            disabled={drafts.length === 1}
+            onClick={() => setDrafts((rows) => rows.filter((_, i) => i !== index))}
+          >
+            Убрать это время
+          </button>
         </div>
       ))}
 

@@ -3,7 +3,13 @@ import * as api from "../api";
 import type { Friends as FriendsData, PersonBrief } from "../types";
 
 /** Друзья: поиск участников, входящие и исходящие заявки. */
-export function Friends({ onClose }: { onClose(): void }) {
+export function Friends({
+  onClose,
+  onOpenPerson,
+}: {
+  onClose(): void;
+  onOpenPerson(id: number): void;
+}) {
   const [data, setData] = useState<FriendsData | null>(null);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<PersonBrief[]>([]);
@@ -62,6 +68,7 @@ export function Friends({ onClose }: { onClose(): void }) {
           <Person
             key={person.id}
             person={person}
+            onOpen={() => onOpenPerson(person.id)}
             action={
               person.friendship === "none" ? (
                 <button className="chip" onClick={() => add(person)}>
@@ -81,6 +88,7 @@ export function Friends({ onClose }: { onClose(): void }) {
               <Person
                 key={person.id}
                 person={person}
+                onOpen={() => onOpenPerson(person.id)}
                 action={
                   <>
                     <button className="chip chip--on" onClick={() => add(person)}>
@@ -104,6 +112,7 @@ export function Friends({ onClose }: { onClose(): void }) {
           <Person
             key={person.id}
             person={person}
+            onOpen={() => onOpenPerson(person.id)}
             action={
               <button className="chip" onClick={() => remove(person)}>
                 убрать
@@ -119,6 +128,7 @@ export function Friends({ onClose }: { onClose(): void }) {
               <Person
                 key={person.id}
                 person={person}
+                onOpen={() => onOpenPerson(person.id)}
                 action={
                   <button className="chip" onClick={() => remove(person)}>
                     отменить
@@ -133,9 +143,17 @@ export function Friends({ onClose }: { onClose(): void }) {
   );
 }
 
-function Person({ person, action }: { person: PersonBrief; action: React.ReactNode }) {
+function Person({
+  person,
+  action,
+  onOpen,
+}: {
+  person: PersonBrief;
+  action: React.ReactNode;
+  onOpen?: () => void;
+}) {
   return (
-    <div className="person-row">
+    <div className="person-row" onClick={onOpen} role={onOpen ? "button" : undefined}>
       {person.photo_url ? (
         <img className="avatar" src={person.photo_url} alt="" />
       ) : (
@@ -146,10 +164,13 @@ function Person({ person, action }: { person: PersonBrief; action: React.ReactNo
       <span style={{ flex: 1 }}>
         <b>{person.display_name}</b>
         <div className="meta">
-          {person.tg_username ? `@${person.tg_username}` : ""}
+          {[person.member_kind_title, person.tg_username && `@${person.tg_username}`]
+            .filter(Boolean)
+            .join(" · ")}
         </div>
       </span>
-      {action}
+      {/* Кнопки не должны проваливать в профиль — у них своё действие. */}
+      <span onClick={(e) => e.stopPropagation()}>{action}</span>
     </div>
   );
 }

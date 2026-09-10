@@ -1,9 +1,18 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
-import { Onboarding } from "./Onboarding";
+import { Favourites } from "./PersonProfile";
+import { Identity } from "./Identity";
+import { Preferences } from "./Preferences";
 import { dateTimeLabel } from "../dates";
-import { kindLabel, levelLabel } from "../labels";
-import type { Application, ClubEvent, MyStats, Profile as ProfileData, Reference, User } from "../types";
+import type {
+  Application,
+  BookBrief,
+  ClubEvent,
+  MyStats,
+  Profile as ProfileData,
+  Reference,
+  User,
+} from "../types";
 
 /** Профиль: анкета целиком редактируемая, плюс двери в «Мои книги», друзей,
  * свои заявки и встречи и — у кого есть права — в админку. */
@@ -14,6 +23,7 @@ export function Profile({
   onOpenFriends,
   onOpenAdmin,
   onOpenEvent,
+  onOpenBook,
 }: {
   user: User;
   reference: Reference;
@@ -21,12 +31,14 @@ export function Profile({
   onOpenFriends(): void;
   onOpenAdmin(): void;
   onOpenEvent(id: number): void;
+  onOpenBook(book: BookBrief): void;
 }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<MyStats | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
   const [events, setEvents] = useState<ClubEvent[]>([]);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState<"none" | "identity" | "preferences">("none");
+  const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
     api.getProfile().then(setProfile);
@@ -35,16 +47,30 @@ export function Profile({
     api.myEvents().then(setEvents);
   }, []);
 
-  if (editing) {
+  if (editing === "identity" && profile) {
     return (
-      <Onboarding
+      <Identity
         initial={profile}
         reference={reference}
         onSaved={(next) => {
           setProfile(next);
-          setEditing(false);
+          setEditing("none");
         }}
-        onCancel={() => setEditing(false)}
+        onCancel={() => setEditing("none")}
+      />
+    );
+  }
+
+  if (editing === "preferences") {
+    return (
+      <Preferences
+        initial={profile}
+        reference={reference}
+        onSaved={(next) => {
+          setProfile(next);
+          setEditing("none");
+        }}
+        onCancel={() => setEditing("none")}
       />
     );
   }
@@ -53,11 +79,14 @@ export function Profile({
     ["submitted", "chat_open"].includes(item.status),
   );
 
-  // Анкета пополнилась после того, как часть людей её уже заполнила: у них
-  // ступень и направление пусты, а заново спрашивать приложение не станет —
-  // анкета формально пройдена. Поэтому напоминаем, но не запираем.
-  const needsStudyInfo =
-    profile?.member_kind === "student" && profile.study_level === null;
+  // Плашка «допройти анкету». Крестик прячет её до следующего запуска бота,
+  // «больше не предупреждать» — навсегда; и то и другое решает сервер.
+  const showReminder = Boolean(profile?.needs_preferences) && !hidden;
+
+  async function dismiss(forever: boolean) {
+    setHidden(true);
+    await api.dismissReminder(forever);
+  }
 
   return (
     <div className="screen">
@@ -72,17 +101,17 @@ export function Profile({
         <div>
           <h1 style={{ marginBottom: 2 }}>{profile?.full_name || user.display_name}</h1>
           <p className="meta">
-            {[
-              profile && kindLabel(profile.member_kind),
-              profile?.program && programTitle(profile.program, reference),
-              profile?.study_level && levelLabel(profile.study_level),
-              profile?.year && `${profile.year} курс`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+            {profile?.member_kind_title}
+            {user.tg_username && ` · @${user.tg_username}`}
           </p>
         </div>
       </div>
+
+      <Favourites
+        books={profile?.favourites ?? []}
+        onOpenBook={onOpenBook}
+        empty="Соберите витрину: до четырёх любимых книг, отмечаются звёздочкой на карточке."
+      />
 
       {stats && (
         <div className="stats-grid" style={{ marginBottom: 16 }}>
@@ -105,17 +134,28 @@ export function Profile({
         </div>
       )}
 
-      {needsStudyInfo && (
-        <div className="notice" style={{ borderColor: "var(--live)" }}>
-          В анкете появились новые вопросы: ступень и направление. Уточните их —
-          это займёт полминуты и поможет собирать встречи под ваш поток.
+      {showReminder && (
+        <div className="notice notice--nudge">
           <button
-            className="primary"
-            style={{ marginTop: 8 }}
-            onClick={() => setEditing(true)}
+            className="notice__close"
+            aria-label="Скрыть"
+            onClick={() => dismiss(false)}
           >
-            Заполнить
+            ✕
           </button>
+          <b>Допройти анкету</b>
+          <div style={{ marginTop: 4 }}>
+            Четыре необязательных вопроса о вкусах — чтобы звать вас на подходящие
+            встречи. Любой можно пропустить.
+          </div>
+          <div className="row row--wrap" style={{ marginTop: 10 }}>
+            <button className="primary" style={{ width: "auto" }} onClick={() => setEditing("preferences")}>
+              Перейти к анкете
+            </button>
+            <button className="ghost" onClick={() => dismiss(true)}>
+              Больше не предупреждать
+            </button>
+          </div>
         </div>
       )}
 
@@ -128,9 +168,16 @@ export function Profile({
       <button
         className="ghost"
         style={{ width: "100%", marginBottom: 8 }}
-        onClick={() => setEditing(true)}
+        onClick={() => setEditing("identity")}
       >
-        ✏️ Изменить анкету
+        ✏️ Имя, роль, почта
+      </button>
+      <button
+        className="ghost"
+        style={{ width: "100%", marginBottom: 8 }}
+        onClick={() => setEditing("preferences")}
+      >
+        🎨 Вкусы и предпочтения
       </button>
       {user.role !== "user" && (
         <button className="ghost" style={{ width: "100%", marginBottom: 8 }} onClick={onOpenAdmin}>
@@ -194,10 +241,4 @@ export function Profile({
       )}
     </div>
   );
-}
-
-/** Название направления берём из справочника, а не дублируем списком:
- * оргкомитет может переименовать его на сервере. */
-function programTitle(program: string, reference: Reference): string {
-  return reference.programs.find((item) => item.key === program)?.title ?? program;
 }

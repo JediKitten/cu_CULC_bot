@@ -170,22 +170,40 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
             </div>
 
             <div className="row" style={{ marginBottom: 12 }}>
-              {(["going", "maybe", "declined"] as const).map((state) => (
+              {(["going", "declined"] as const).map((state) => (
                 <button
                   key={state}
                   className={`chip ${event.my_state === state ? "chip--on" : ""}`}
                   disabled={busy}
                   onClick={() => run(api.setParticipation(event.id, state))}
                 >
-                  {{ going: "Приду", maybe: "Может быть", declined: "Не смогу" }[state]}
+                  {{ going: "Иду", declined: "Не иду" }[state]}
                 </button>
               ))}
             </div>
+
+            {event.my_state === "going" && (
+              <p className="notice">
+                Вы записаны. Если встреча идёт через клубную афишу вуза, отметьтесь ещё
+                и там — так вас посчитают на входе.{" "}
+                <a className="link" href="https://t.me/cu_clubs_bot">
+                  @cu_clubs_bot
+                </a>
+              </p>
+            )}
+
+            {(event.friends_going.length > 0 || event.friends_waiting.length > 0) && (
+              <p className="meta">
+                {event.friends_going.length > 0 && `👋 Идут: ${event.friends_going.join(", ")}. `}
+                {event.friends_waiting.length > 0 &&
+                  `Ждали эту встречу: ${event.friends_waiting.join(", ")}.`}
+              </p>
+            )}
             {event.my_state === "waitlist" && (
               <p className="notice">Мест уже нет — вы в очереди, сообщим, если освободится.</p>
             )}
 
-            {!event.attended && (
+            {!event.attended && event.code_available && (
               <div className="card">
                 <p className="hint">Ведущий назовёт код на встрече — введите его здесь.</p>
                 <div className="row">
@@ -212,16 +230,24 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
                 <h2 style={{ marginTop: 0 }}>Ведущему</h2>
                 {shownCode ? (
                   <div className="big-code">{shownCode}</div>
-                ) : (
+                ) : event.code_available ? (
                   <button
                     className="ghost"
                     style={{ width: "100%" }}
                     onClick={() =>
-                      api.attendanceCode(event.id).then((result) => setShownCode(result.code))
+                      api
+                        .attendanceCode(event.id)
+                        .then((result) => setShownCode(result.code))
+                        .catch((e) => setError(e.message))
                     }
                   >
                     Показать код присутствия
                   </button>
+                ) : (
+                  <p className="hint">
+                    Код появится за полчаса до начала и будет работать несколько часов
+                    после — чтобы его нельзя было переслать тому, кто не пришёл.
+                  </p>
                 )}
                 <button
                   className="ghost"
@@ -247,7 +273,7 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
           </>
         )}
 
-        {(event.status === "held" || event.attended) && (
+        {event.attended && (
           <div className="card">
             <h2 style={{ marginTop: 0 }}>Как прошло?</h2>
             <StarRating
@@ -262,6 +288,12 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
               }
             />
           </div>
+        )}
+
+        {event.status === "held" && !event.attended && (
+          <p className="hint">
+            Оценить можно встречу, на которой вы были: отметка ставится кодом на месте.
+          </p>
         )}
 
         {event.status === "cancelled" && (

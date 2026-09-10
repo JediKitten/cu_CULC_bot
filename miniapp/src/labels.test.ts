@@ -3,7 +3,8 @@ import { audienceLabel, kindLabel } from "./labels";
 
 describe("подписи аудитории", () => {
   it("склоняет категории для фразы «только для…»", () => {
-    expect(audienceLabel("student")).toBe("студентов");
+    expect(audienceLabel("bachelor")).toBe("бакалавров");
+    expect(audienceLabel("master")).toBe("магистрантов");
     expect(audienceLabel("guest")).toBe("внешних гостей");
   });
 

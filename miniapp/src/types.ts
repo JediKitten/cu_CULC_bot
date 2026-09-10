@@ -1,7 +1,5 @@
 export type Role = "user" | "moderator" | "admin" | "superadmin";
-export type MemberKind = "student" | "applicant" | "staff" | "guest";
-export type StudyLevel = "bachelor" | "master";
-export type Program = "development" | "ai" | "business" | "design" | "undecided";
+export type MemberKind = "applicant" | "bachelor" | "master" | "staff" | "guest";
 export type ReadingStatus = "want_to_read" | "reading" | "finished" | "abandoned";
 export type EventStatus =
   | "slot_selection"
@@ -15,7 +13,7 @@ export type ApplicationStatus =
   | "approved"
   | "rejected"
   | "withdrawn";
-export type ParticipationState = "going" | "maybe" | "declined" | "waitlist";
+export type ParticipationState = "going" | "declined" | "waitlist";
 
 export type User = {
   id: number;
@@ -34,34 +32,34 @@ export type EventType = {
   requires_reading: boolean;
 };
 
-export type ProgramOption = {
-  key: Program;
+export type KindOption = {
+  key: MemberKind;
   title: string;
-  /** «Ещё не определился» — только для первокурсников. */
-  first_year_only: boolean;
+  email_required: boolean;
 };
 
 export type Reference = {
   genres: string[];
   event_types: EventType[];
-  programs: ProgramOption[];
+  kinds: KindOption[];
   email_domains: string[];
 };
 
 export type Profile = {
   member_kind: MemberKind;
+  member_kind_title: string;
   full_name: string;
-  study_level: StudyLevel | null;
-  program: Program | null;
-  year: number | null;
   university_email: string | null;
-  reading_pace: "rare" | "steady" | "fast" | null;
+  reading_pace: "none" | "rare" | "steady" | "fast" | null;
   club_experience: "none" | "visitor" | "organizer" | null;
   genres: string[];
   event_type_ids: number[];
   about: string | null;
   completed_at: string | null;
+  preferences_at: string | null;
+  needs_preferences: boolean;
   email_required: boolean;
+  favourites: BookBrief[];
 };
 
 export type BookBrief = {
@@ -74,6 +72,8 @@ export type BookBrief = {
   external_id: string | null;
   reading_status: ReadingStatus | null;
   my_score: number | null;
+  liked: boolean;
+  favourite_position: number | null;
   demanded: boolean;
   demand_count: number;
 };
@@ -129,10 +129,13 @@ export type ClubEvent = {
   duration_minutes: number | null;
   slots: Slot[];
   going: number;
+  friends_going: string[];
+  friends_waiting: string[];
   my_state: ParticipationState | null;
   my_event: boolean;
   attended: boolean;
   my_feedback_score: number | null;
+  code_available: boolean;
   cancel_reason: string | null;
 };
 
@@ -181,9 +184,18 @@ export type PersonBrief = {
   display_name: string;
   photo_url: string | null;
   tg_username: string | null;
-  program: Program | null;
   member_kind: MemberKind | null;
+  member_kind_title: string | null;
   friendship: "none" | "outgoing" | "incoming" | "friends" | null;
+};
+
+export type PersonProfile = {
+  person: PersonBrief;
+  about: string | null;
+  favourites: BookBrief[];
+  finished: number;
+  events_attended: number;
+  genres: string[];
 };
 
 export type Friends = {

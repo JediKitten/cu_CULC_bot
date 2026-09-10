@@ -33,8 +33,6 @@ from app.services import profiles
 
 logger = logging.getLogger(__name__)
 
-router = Router()
-
 WELCOME = (
     "<b>Литклуб ЦУ</b>\n\n"
     "Здесь ведут читательский дневник, собирают спрос на обсуждения и "
@@ -126,7 +124,12 @@ async def ensure_user(message: Message) -> int:
 
 def build_router(miniapp_url: callable) -> Router:
     """Роутер регистрации. Адрес Mini App приходит функцией: в разработке он
-    меняется при каждом перезапуске туннеля."""
+    меняется при каждом перезапуске туннеля.
+
+    Экземпляр создаётся здесь, а не на уровне модуля: иначе повторный вызов
+    навесил бы вторую копию обработчиков, и бот отвечал бы дважды.
+    """
+    router = Router()
 
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext) -> None:

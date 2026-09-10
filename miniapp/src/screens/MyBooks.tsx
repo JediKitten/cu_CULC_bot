@@ -5,6 +5,7 @@ import type { BookBrief } from "../types";
 
 const FILTERS = [
   { key: "", label: "Все" },
+  { key: "liked", label: "♥ Любимые" },
   { key: "finished", label: "Прочитал" },
   { key: "reading", label: "Читаю" },
   { key: "want_to_read", label: "Хочу прочитать" },
@@ -26,9 +27,11 @@ export function MyBooks({
 
   useEffect(() => {
     setLoading(true);
+    // «Любимые» — не статус чтения, а отдельная отметка, поэтому фильтруем
+    // на клиенте: сервер отдаёт всю полку разом.
     api
-      .myBooks(filter || undefined)
-      .then(setItems)
+      .myBooks(filter && filter !== "liked" ? filter : undefined)
+      .then((rows) => setItems(filter === "liked" ? rows.filter((b) => b.liked) : rows))
       .finally(() => setLoading(false));
   }, [filter]);
 
@@ -56,7 +59,11 @@ export function MyBooks({
 
         {loading && <p className="hint">Загружаем…</p>}
         {!loading && items.length === 0 && (
-          <p className="hint">Здесь пусто. Отмечайте книги во вкладке «Книги».</p>
+          <p className="hint">
+            {filter === "liked"
+              ? "Пока ничего не понравилось. Сердечко стоит на карточке книги."
+              : "Здесь пусто. Отмечайте книги во вкладке «Книги»."}
+          </p>
         )}
         {items.map((book) => (
           <BookRow

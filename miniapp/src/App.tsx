@@ -7,8 +7,8 @@ import { Books } from "./screens/Books";
 import { EventDetail } from "./screens/EventDetail";
 import { Events } from "./screens/Events";
 import { Friends } from "./screens/Friends";
+import { PersonProfile } from "./screens/PersonProfile";
 import { MyBooks } from "./screens/MyBooks";
-import { Onboarding } from "./screens/Onboarding";
 import { Profile } from "./screens/Profile";
 import { initTelegram } from "./telegram";
 import type { BookBrief, BookCard, Reference, User } from "./types";
@@ -36,6 +36,7 @@ export default function App() {
   const [openEvent, setOpenEvent] = useState<number | null>(null);
   const [organizeFor, setOrganizeFor] = useState<BookCard | null>(null);
   const [screen, setScreen] = useState<"none" | "books" | "friends" | "admin">("none");
+  const [openPerson, setOpenPerson] = useState<number | null>(null);
 
   useEffect(() => {
     initTelegram();
@@ -78,16 +79,19 @@ export default function App() {
 
   if (!user || !reference) return <div className="center">Загружаем…</div>;
 
-  // До анкеты остальное приложение закрыто — и на сервере тоже, эта проверка
-  // лишь избавляет от бессмысленных 403.
+  // Регистрация живёт в боте: там человеку объясняют, что это за клуб, и
+  // спрашивают минимум. Приложение без неё показывать нечего.
   if (!user.onboarded) {
     return (
-      <div className="app">
-        <Onboarding
-          initial={null}
-          reference={reference}
-          onSaved={() => setUser({ ...user, onboarded: true })}
-        />
+      <div className="center">
+        <h1>Почти готово</h1>
+        <p>
+          Знакомство проходит в боте — три коротких вопроса. Напишите ему
+          <b> /start</b>, а потом возвращайтесь сюда.
+        </p>
+        <p className="hint">
+          Если вы уже отвечали, закройте приложение и откройте заново.
+        </p>
       </div>
     );
   }
@@ -113,6 +117,7 @@ export default function App() {
           onOpenFriends={() => setScreen("friends")}
           onOpenAdmin={() => setScreen("admin")}
           onOpenEvent={setOpenEvent}
+          onOpenBook={(book) => setOpenBook({ book, want: false })}
         />
       )}
 
@@ -155,7 +160,16 @@ export default function App() {
           onOpenBook={(book, want = false) => setOpenBook({ book, want })}
         />
       )}
-      {screen === "friends" && <Friends onClose={() => setScreen("none")} />}
+      {screen === "friends" && (
+        <Friends onClose={() => setScreen("none")} onOpenPerson={setOpenPerson} />
+      )}
+      {openPerson !== null && (
+        <PersonProfile
+          userId={openPerson}
+          onClose={() => setOpenPerson(null)}
+          onOpenBook={(book) => setOpenBook({ book, want: false })}
+        />
+      )}
       {screen === "admin" && <Admin role={user.role} onClose={() => setScreen("none")} />}
 
       <nav className="tabs">
@@ -188,6 +202,8 @@ function emptyBook(id: number): BookBrief {
     external_id: null,
     reading_status: null,
     my_score: null,
+    liked: false,
+    favourite_position: null,
     demanded: false,
     demand_count: 0,
   };

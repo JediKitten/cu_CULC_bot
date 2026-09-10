@@ -34,6 +34,7 @@ export function BookDetail({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [wantOpen, setWantOpen] = useState(wantOnOpen);
+  const [favouriteOpen, setFavouriteOpen] = useState(false);
   const [chosen, setChosen] = useState<number[]>([]);
   const [review, setReview] = useState("");
 
@@ -99,7 +100,7 @@ export function BookDetail({
   if (error && !card) {
     return (
       <div className="overlay">
-        <Head onClose={onClose} title="Книга" />
+        <Head onClose={onClose} />
         <div className="screen">
           <p className="error">{error}</p>
         </div>
@@ -110,7 +111,7 @@ export function BookDetail({
   if (!card) {
     return (
       <div className="overlay">
-        <Head onClose={onClose} title="Книга" />
+        <Head onClose={onClose} />
         <div className="screen">
           <p className="hint">Загружаем…</p>
         </div>
@@ -122,7 +123,7 @@ export function BookDetail({
 
   return (
     <div className="overlay">
-      <Head onClose={onClose} title={card.title} />
+      <Head onClose={onClose} />
 
       <div className="screen">
         <div className="row" style={{ alignItems: "flex-start", marginBottom: 16 }}>
@@ -151,6 +152,61 @@ export function BookDetail({
 
         {error && <p className="error">{error}</p>}
 
+        <div className="row row--wrap" style={{ marginBottom: 12 }}>
+          <button
+            className={`chip ${card.liked ? "chip--on" : ""}`}
+            disabled={busy}
+            onClick={() => update(api.setLike(card.id!, !card.liked))}
+          >
+            {card.liked ? "♥ Нравится" : "♡ Нравится"}
+          </button>
+          <button
+            className={`chip ${card.favourite_position ? "chip--on" : ""}`}
+            disabled={busy}
+            onClick={() => setFavouriteOpen((open) => !open)}
+          >
+            {card.favourite_position
+              ? `★ Любимая · ${card.favourite_position}`
+              : "★ В любимые"}
+          </button>
+        </div>
+
+        {favouriteOpen && (
+          <div className="card">
+            <p className="hint">
+              Четыре любимые книги стоят на витрине профиля. Выберите место —
+              занятое освободится само.
+            </p>
+            <div className="row row--wrap">
+              {[1, 2, 3, 4].map((position) => (
+                <button
+                  key={position}
+                  className={`chip ${card.favourite_position === position ? "chip--on" : ""}`}
+                  disabled={busy}
+                  onClick={() => {
+                    update(api.setFavourite(card.id!, position));
+                    setFavouriteOpen(false);
+                  }}
+                >
+                  {position}
+                </button>
+              ))}
+              {card.favourite_position && (
+                <button
+                  className="chip danger"
+                  disabled={busy}
+                  onClick={() => {
+                    update(api.setFavourite(card.id!, null));
+                    setFavouriteOpen(false);
+                  }}
+                >
+                  убрать с витрины
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         <h2>Мой дневник</h2>
         <div className="row row--wrap" style={{ marginBottom: 10 }}>
           {STATUSES.map(({ key, label }) => (
@@ -171,7 +227,7 @@ export function BookDetail({
           ))}
         </div>
 
-        {status && (
+        {status && status !== "want_to_read" && (
           <>
             <StarRating
               value={card.my_score === null ? null : card.my_score / 2}
@@ -315,15 +371,17 @@ export function BookDetail({
   );
 }
 
-function Head({ onClose, title }: { onClose(): void; title: string }) {
+/** Шапка оверлея.
+ *
+ * Названия здесь нет намеренно: оно уже крупно написано на самой карточке,
+ * а дубль в двух строках подряд читается как ошибка вёрстки.
+ */
+function Head({ onClose }: { onClose(): void }) {
   return (
     <div className="overlay-head">
-      <button onClick={onClose} aria-label="Назад">
+      <button className="back" onClick={onClose} aria-label="Назад">
         ←
       </button>
-      <b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {title}
-      </b>
     </div>
   );
 }

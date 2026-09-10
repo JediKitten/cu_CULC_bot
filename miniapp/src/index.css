@@ -535,6 +535,71 @@ select:focus {
   z-index: 1;
 }
 
+/* Стрелка «назад»: попасть в неё пальцем должно быть легко, поэтому
+   у кнопки полноценная площадь нажатия, а не один символ. */
+.back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-left: -8px;
+  font-size: 26px;
+  line-height: 1;
+  border-radius: 50%;
+  color: var(--text);
+}
+
+.back:active {
+  background: var(--surface-2);
+}
+
+.notice--nudge {
+  position: relative;
+  border-color: color-mix(in srgb, var(--live) 55%, transparent);
+  color: var(--text);
+  padding-right: 36px;
+}
+
+.notice__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  color: var(--hint);
+  font-size: 15px;
+}
+
+.favourites {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.favourites .cover,
+.favourites .cover--empty {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+}
+
+.favourite-slot {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  aspect-ratio: 2 / 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hint);
+  font-size: 20px;
+}
+
+.book-row {
+  cursor: pointer;
+}
+
 .person-row {
   display: flex;
   gap: 10px;

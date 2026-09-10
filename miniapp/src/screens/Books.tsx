@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
 import { BookRow } from "../components/BookRow";
-import type { BookBrief } from "../types";
+import type { BookBrief, BookCard } from "../types";
 
 /** Вкладка «Книги»: поиск и список.
  *
@@ -45,31 +45,34 @@ export function Books({ onOpenBook }: { onOpenBook(book: BookBrief, want?: boole
   }
 
   async function read(book: BookBrief) {
-    const key = book.id ? `id${book.id}` : `${book.source}:${book.external_id}`;
-    setBusy(key);
-    try {
-      const id = await materialize(book);
-      if (id === null) return;
-      const card = await api.markRead(id);
-      setItems((rows) => rows.map((row) => (row === book ? { ...row, ...card } : row)));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не получилось");
-    } finally {
-      setBusy(null);
-    }
+    await act(book, (id) => api.markRead(id));
   }
 
   async function want(book: BookBrief) {
+    // Отметка ставится сразу, без уточнения формата. Уточнить тип встречи
+    // можно на карточке книги — это отдельный, необязательный шаг.
+    await act(book, async (id) =>
+      book.demanded ? api.dropDemand(id).then(() => api.getBook(id)) : api.addDemand(id, []).then(() => api.getBook(id)),
+    );
+  }
+
+  async function score(book: BookBrief, stars: number | null) {
+    await act(book, (id) =>
+      api.saveDiary(id, {
+        status: "finished",
+        score: stars === null ? null : Math.round(stars * 2),
+      }),
+    );
+  }
+
+  /** Общая обвязка: завести книгу в каталоге, выполнить действие, обновить строку. */
+  async function act(book: BookBrief, action: (id: number) => Promise<BookCard>) {
     const key = book.id ? `id${book.id}` : `${book.source}:${book.external_id}`;
     setBusy(key);
     try {
       const id = await materialize(book);
       if (id === null) return;
-      // Отметка ставится сразу, без уточнения формата. Уточнить тип встречи
-      // можно на карточке книги — это отдельный, необязательный шаг.
-      if (book.demanded) await api.dropDemand(id);
-      else await api.addDemand(id, []);
-      const card = await api.getBook(id);
+      const card = await action(id);
       setItems((rows) => rows.map((row) => (row === book ? { ...row, ...card } : row)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не получилось");
@@ -114,6 +117,9 @@ export function Books({ onOpenBook }: { onOpenBook(book: BookBrief, want?: boole
           onOpen={() => onOpenBook(book)}
           onRead={() => read(book)}
           onWant={() => want(book)}
+          onScore={(stars) => score(book, stars)}
+          onRefine={() => onOpenBook(book, true)}
+          onOrganize={() => onOpenBook(book, true)}
         />
       ))}
     </div>

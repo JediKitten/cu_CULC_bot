@@ -5,30 +5,23 @@
  */
 
 const AUDIENCE: Record<string, string> = {
-  student: "студентов",
   applicant: "абитуриентов",
+  bachelor: "бакалавров",
+  master: "магистрантов",
   staff: "сотрудников",
   guest: "внешних гостей",
 };
 
 const KIND: Record<string, string> = {
-  student: "студент",
   applicant: "абитуриент",
+  bachelor: "бакалавр",
+  master: "магистрант",
   staff: "сотрудник",
-  guest: "гость",
+  guest: "внешний гость",
 };
 
 /** «только для студентов» — в родительном падеже, как в фразе целиком. */
 export const audienceLabel = (kind: string): string => AUDIENCE[kind] ?? kind;
 
-const LEVEL: Record<string, string> = {
-  bachelor: "бакалавриат",
-  master: "магистратура",
-};
-
 /** «студент» — как подпись в профиле. */
 export const kindLabel = (kind: string): string => KIND[kind] ?? kind;
-
-/** «бакалавриат» — подпись ступени. */
-export const levelLabel = (level: string | null): string | null =>
-  level ? (LEVEL[level] ?? level) : null;

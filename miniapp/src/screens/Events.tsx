@@ -12,6 +12,12 @@ import type { Board, ClubEvent, DemandCard } from "../types";
  * которых ждут, но ведущего ещё нет. Это одна и та же история на разных
  * стадиях, поэтому и экран один.
  */
+const PAST_FILTERS: { value: boolean | undefined; label: string }[] = [
+  { value: undefined, label: "Все" },
+  { value: true, label: "Был" },
+  { value: false, label: "Не был" },
+];
+
 export function Events({
   onOpenEvent,
   onOpenBook,
@@ -21,7 +27,13 @@ export function Events({
 }) {
   const [board, setBoard] = useState<Board | null>(null);
   const [past, setPast] = useState<ClubEvent[] | null>(null);
+  const [pastFilter, setPastFilter] = useState<boolean | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+
+  async function loadPast(attended?: boolean) {
+    setPastFilter(attended);
+    setPast((await api.pastBoard(attended)).events);
+  }
 
   useEffect(() => {
     api
@@ -45,12 +57,13 @@ export function Events({
         <EventCard key={event.id} event={event} onOpen={() => onOpenEvent(event.id)} />
       ))}
 
-      <h2>Ждут встречи</h2>
-      {board.demands.length === 0 && (
+      <h2>Мероприятие ещё не назначено</h2>
+      {board.demands.length === 0 ? (
         <p className="hint">
-          Спроса пока нет. Отметьте на карточке книги, что хотите её обсудить, — и он появится.
+          Пока ни одна книга не ждёт своей встречи. Отметьте на карточке книги, что хотите
+          её обсудить, — и она появится здесь.
         </p>
-      )}
+      ) : null}
       {board.demands.map((demand) => (
         <DemandRow
           key={demand.book.id}
@@ -61,19 +74,36 @@ export function Events({
 
       <h2>Прошедшие</h2>
       {past === null ? (
-        <button
-          className="ghost"
-          style={{ width: "100%" }}
-          onClick={() => api.pastBoard().then((result) => setPast(result.events))}
-        >
+        <button className="ghost" style={{ width: "100%" }} onClick={() => loadPast()}>
           Показать прошедшие
         </button>
-      ) : past.length === 0 ? (
-        <p className="hint">Ещё ничего не прошло.</p>
       ) : (
-        past.map((event) => (
-          <EventCard key={event.id} event={event} onOpen={() => onOpenEvent(event.id)} />
-        ))
+        <>
+          <div className="row row--wrap" style={{ marginBottom: 10 }}>
+            {PAST_FILTERS.map((item) => (
+              <button
+                key={String(item.value)}
+                className={`chip ${pastFilter === item.value ? "chip--on" : ""}`}
+                onClick={() => loadPast(item.value)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {past.length === 0 ? (
+            <p className="hint">
+              {pastFilter === true
+                ? "Вы пока не были ни на одной встрече."
+                : pastFilter === false
+                  ? "Вы были на всех прошедших встречах."
+                  : "Ещё ничего не прошло."}
+            </p>
+          ) : (
+            past.map((event) => (
+              <EventCard key={event.id} event={event} onOpen={() => onOpenEvent(event.id)} />
+            ))
+          )}
+        </>
       )}
     </div>
   );
@@ -125,6 +155,14 @@ function EventCard({ event, onOpen }: { event: ClubEvent; onOpen(): void }) {
         <div className="meta" style={{ marginTop: 6 }}>
           Идут: {event.going}
           {event.my_state === "going" && " · вы записаны"}
+        </div>
+      )}
+      {(event.friends_going.length > 0 || event.friends_waiting.length > 0) && (
+        <div className="meta" style={{ marginTop: 4 }}>
+          {event.friends_going.length > 0 && `👋 ${event.friends_going.join(", ")} идёт`}
+          {event.friends_going.length > 0 && event.friends_waiting.length > 0 && " · "}
+          {event.friends_waiting.length > 0 &&
+            `${event.friends_waiting.join(", ")} ждёт эту встречу`}
         </div>
       )}
       {event.audience.length > 0 && (
