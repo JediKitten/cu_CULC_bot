@@ -190,3 +190,17 @@ async def test_registration_survives_repeat_without_losing_preferences(client):
     assert profile["genres"] == ["Классика"]
     assert profile["needs_preferences"] is False
     assert CU_EMAIL == "student@edu.centraluniversity.ru"
+
+
+def test_empty_init_data_says_what_happened():
+    """Пустая строка — это «до подписи не добрались», а не «подпись битая».
+    Текст ошибки читает человек в приложении, и он должен подсказывать шаг."""
+    from app.core.telegram_auth import InitDataError, parse_init_data
+
+    with pytest.raises(InitDataError) as failure:
+        parse_init_data("", "123:TOKEN")
+    assert "не передал данные входа" in str(failure.value)
+
+    with pytest.raises(InitDataError) as broken:
+        parse_init_data("user=%7B%7D&auth_date=1", "123:TOKEN")
+    assert "подписи" in str(broken.value)

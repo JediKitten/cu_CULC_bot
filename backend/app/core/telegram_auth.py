@@ -44,10 +44,19 @@ def parse_init_data(
     if not bot_token:
         raise BotNotConfigured("TELEGRAM_BOT_TOKEN не задан — проверить подпись невозможно")
 
+    if not init_data.strip():
+        # Пустая строка приходит, когда до подписи вообще не добрались: скрипт
+        # SDK не догрузился, либо приложение открыли не из Telegram. Это разные
+        # беды, но обе — не «сломанная подпись», и текст должен это отражать.
+        raise InitDataError(
+            "Telegram не передал данные входа. Закройте приложение и откройте "
+            "заново через кнопку меню бота."
+        )
+
     fields = dict(parse_qsl(init_data, keep_blank_values=True))
     received_hash = fields.pop("hash", None)
     if not received_hash:
-        raise InitDataError("В initData нет поля hash")
+        raise InitDataError("Данные входа повреждены: в них нет подписи")
 
     check_string = "\n".join(f"{k}={fields[k]}" for k in sorted(fields))
     secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()

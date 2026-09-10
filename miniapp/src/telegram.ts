@@ -42,6 +42,39 @@ declare global {
 
 export const webApp = (): WebApp | undefined => window.Telegram?.WebApp;
 
+/** initData из адреса страницы.
+ *
+ * Telegram кладёт подписанные данные во фрагмент URL — `#tgWebAppData=...`, —
+ * а SDK всего лишь их оттуда разбирает. Читаем сами, потому что скрипт SDK
+ * грузится с telegram.org, и если этот запрос не прошёл (прокси, фильтрация,
+ * плохая сеть), объекта window.Telegram не будет вовсе, а данные при этом
+ * никуда не делись.
+ *
+ * Считываем один раз при загрузке: фрагмент живёт в адресной строке, и его
+ * может затереть навигация внутри приложения.
+ */
+export function parseFragmentInitData(hash: string): string {
+  try {
+    // Разбираем вручную, а не через URLSearchParams: тот превращает «+»
+    // в пробел, а внутри подписанной строки это ломает хеш.
+    const match = /(?:^|&)tgWebAppData=([^&]*)/.exec(hash.replace(/^#/, ""));
+    return match ? decodeURIComponent(match[1]) : "";
+  } catch {
+    // Битая последовательность %-кодов — не повод ронять вход.
+    return "";
+  }
+}
+
+const fragmentInitData = parseFragmentInitData(
+  typeof location === "undefined" ? "" : location.hash,
+);
+
+/** Открыто ли приложение внутри Telegram — по любому из двух признаков.
+ * Нужно, чтобы отличить «нет подписи, потому что не Telegram» от «подпись
+ * есть, но SDK не догрузился». */
+export const insideTelegram = (): boolean =>
+  Boolean(webApp()?.initData || fragmentInitData);
+
 // Тот же цвет, что и --bg в index.css. Дублируется намеренно: шапку и фон
 // вокруг окна красит сам Telegram, до CSS приложения он не добирается.
 const BACKGROUND = "#0f1012";
@@ -67,6 +100,9 @@ export function haptic(style: "light" | "medium" | "heavy" = "light"): void {
 export function getInitData(): string {
   const real = webApp()?.initData;
   if (real) return real;
+
+  // SDK не догрузился, но сам Telegram данные передал — берём их из адреса.
+  if (fragmentInitData) return fragmentInitData;
 
   // Отладка вне Telegram: ?initData=<подписанная строка>. Это не обход входа —
   // подпись всё равно проверяется бэкендом по токену бота, здесь лишь способ

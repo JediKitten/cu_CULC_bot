@@ -10,7 +10,7 @@ import { Friends } from "./screens/Friends";
 import { PersonProfile } from "./screens/PersonProfile";
 import { MyBooks } from "./screens/MyBooks";
 import { Profile } from "./screens/Profile";
-import { initTelegram } from "./telegram";
+import { initTelegram, insideTelegram } from "./telegram";
 import type { BookBrief, BookCard, Reference, User } from "./types";
 
 type Tab = "books" | "events" | "profile";
@@ -66,13 +66,30 @@ export default function App() {
   }, [user?.onboarded]);
 
   if (authError) {
+    // Разделяем два разных случая. Открыто не в Telegram — подписи нет и быть
+    // не может. Открыто в Telegram, но подписи всё равно нет — значит, до неё
+    // не добрались: чаще всего мешает сеть.
+    const inside = insideTelegram() || Boolean(window.Telegram);
     return (
       <div className="center">
         <p className="error">{authError}</p>
-        <p className="hint">
-          Приложение работает только внутри Telegram: вход подтверждается подписью, которую
-          выдаёт сам мессенджер.
-        </p>
+        {inside ? (
+          <>
+            <p className="hint">
+              Telegram не передал подпись входа. Обычно помогает закрыть приложение
+              и открыть заново — через кнопку меню бота.
+            </p>
+            <p className="hint">
+              Если повторяется: попробуйте выключить прокси или VPN на время входа.
+              Приложению нужен доступ к telegram.org.
+            </p>
+          </>
+        ) : (
+          <p className="hint">
+            Приложение работает только внутри Telegram: вход подтверждается подписью,
+            которую выдаёт сам мессенджер.
+          </p>
+        )}
       </div>
     );
   }
