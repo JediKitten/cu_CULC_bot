@@ -163,3 +163,47 @@ async def test_approval_releases_the_room(session, bot):
 
     room = await session.get(MeetingRoom, application.room_id)
     assert room.status is RoomStatus.FREE
+
+
+def test_candidates_handle_ids_pasted_without_prefix():
+    """Идентификатор супергруппы часто копируют без приставки -100 — это не
+    повод отвечать «чат не найден» и оставлять человека гадать."""
+    assert rooms.candidates(-1001234567890) == [-1001234567890]
+    assert rooms.candidates(4475231590) == [-1004475231590, 4475231590]
+    assert rooms.candidates(-4475231590) == [-4475231590, -1004475231590]
+    # Ноль — это не чат, а незаполненное поле.
+    assert rooms.candidates(0) == []
+
+
+async def test_broken_room_is_not_saved(session, bot, monkeypatch):
+    """Комната, которую бот не нашёл, в пул не попадает: раньше запись
+    создавалась в любом случае, и пул засорялся заведомо мёртвыми чатами."""
+
+    async def nothing_found(chat_id):
+        return None
+
+    monkeypatch.setattr("app.services.rooms.resolve", nothing_found)
+
+    with pytest.raises(rooms.RoomNotReady) as failure:
+        await rooms.register(session, 12345, None, added_by=None)
+    assert "администратор" in str(failure.value)
+
+    left = (
+        await session.execute(sa.select(sa.func.count()).select_from(MeetingRoom))
+    ).scalar_one()
+    assert left == 0
+
+
+async def test_forget_releases_and_unlinks(session, bot, monkeypatch):
+    """Убранная комната отвязывается от заявки, а не оставляет её со ссылкой
+    в никуда."""
+    application = await setup_application(session)
+    room = await rooms.open_chat(session, application)
+    assert application.room_id == room.id
+
+    await rooms.forget(session, room)
+
+    await session.refresh(application)
+    assert application.room_id is None
+    assert application.invite_link is None
+    assert await session.get(MeetingRoom, room.id) is None

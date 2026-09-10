@@ -232,29 +232,10 @@ async def listing_rooms(
     rows = (
         await session.execute(sa.select(MeetingRoom).order_by(MeetingRoom.id))
     ).scalars()
-    return [
-        RoomOut(
-            id=room.id,
-            chat_id=room.chat_id,
-            title=room.title,
-            status=room.status,
-            application_id=room.current_application_id,
-            checked_at=room.checked_at,
-            check_error=room.check_error,
-        )
-        for room in rows
-    ]
+    return [_room_out(room) for room in rows]
 
 
-@router.post("/rooms", response_model=RoomOut)
-async def add_room(
-    body: RoomIn,
-    actor: RequireAdmin,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> RoomOut:
-    """Добавить чат в пул. Чат создаёт человек — бот этого не умеет; здесь мы
-    только проверяем, что бот в нём администратор с нужными правами."""
-    room = await rooms.register(session, body.chat_id, body.title, actor.id)
+def _room_out(room: MeetingRoom) -> RoomOut:
     return RoomOut(
         id=room.id,
         chat_id=room.chat_id,
@@ -264,6 +245,47 @@ async def add_room(
         checked_at=room.checked_at,
         check_error=room.check_error,
     )
+
+
+@router.post("/rooms", response_model=RoomOut)
+async def add_room(
+    body: RoomIn,
+    actor: RequireAdmin,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RoomOut:
+    """Добавить чат в пул.
+
+    Чат создаёт человек — бот этого не умеет. Здесь мы проверяем, что бот
+    в нём администратор с нужными правами, и только тогда заводим запись:
+    комната, которая заведомо не работает, в пуле не нужна.
+    """
+    try:
+        room = await rooms.register(session, body.chat_id, body.title, actor.id)
+    except rooms.RoomNotReady as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return _room_out(room)
+
+
+@router.delete("/rooms/{room_id}", status_code=204)
+async def delete_room(
+    room_id: int,
+    actor: RequireAdmin,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Убрать комнату из пула. Сам чат остаётся: бот из него не выходит,
+    система просто перестаёт им распоряжаться."""
+    room = await session.get(MeetingRoom, room_id)
+    if room is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Комната не найдена")
+    audit.log(
+        session,
+        actor_id=actor.id,
+        entity="meeting_room",
+        entity_id=room.id,
+        action="forget",
+        payload={"chat_id": room.chat_id},
+    )
+    await rooms.forget(session, room)
 
 
 @router.post("/rooms/{room_id}/check", status_code=204)

@@ -53,30 +53,107 @@ async def check(session: AsyncSession, room: MeetingRoom) -> str | None:
     return problem
 
 
+def candidates(chat_id: int) -> list[int]:
+    """Во что мог превратиться идентификатор по дороге из Telegram.
+
+    У супергрупп он отрицательный и начинается с -100, но в интерфейсах его
+    часто показывают без этой приставки, а кто-то копирует уже с минусом.
+    Перебираем осмысленные варианты, вместо того чтобы отвечать «чат не найден»
+    и оставлять человека гадать, что он сделал не так.
+    """
+    if chat_id == 0:
+        return []
+    if chat_id < 0:
+        # -1001234567890 — уже полный вид; -1234567890 — минус есть, приставки нет.
+        return [chat_id] if str(chat_id).startswith("-100") else [chat_id, int(f"-100{-chat_id}")]
+    return [int(f"-100{chat_id}"), chat_id]
+
+
+async def resolve(chat_id: int) -> tuple[int, str] | None:
+    """Находит чат, где бот действительно администратор с нужными правами.
+
+    Возвращает найденный идентификатор и название либо None.
+    """
+    bot = get_bot()
+    me = (await bot.me()).id
+    for candidate in candidates(chat_id):
+        try:
+            member = await bot.get_chat_member(candidate, me)
+            if member.status != "administrator":
+                continue
+            if any(not getattr(member, right, False) for right in REQUIRED_RIGHTS):
+                continue
+            chat = await bot.get_chat(candidate)
+            return candidate, chat.title or f"Переговорка {candidate}"
+        except TelegramAPIError:
+            continue
+    return None
+
+
+class RoomNotReady(RuntimeError):
+    """Чат не найден или бот в нём не администратор — заводить нечего."""
+
+
 async def register(
     session: AsyncSession, chat_id: int, title: str | None, added_by: int
 ) -> MeetingRoom:
-    """Заводит комнату в пуле. Название берём из самого чата, если не задано."""
+    """Заводит комнату в пуле.
+
+    Комната сохраняется только после того, как бот убедился, что чат
+    существует и он в нём администратор с правами на переименование,
+    приглашение и удаление сообщений. Раньше запись создавалась в любом
+    случае — и пул засорялся комнатами, которые никогда не заработают.
+    """
+    try:
+        found = await resolve(chat_id)
+    except BotUnavailable as exc:
+        raise RoomNotReady("Бот не настроен: нет токена") from exc
+
+    if found is None:
+        raise RoomNotReady(
+            "Не нашёл такой чат или бот в нём не администратор. Проверьте, что: "
+            "чат — супергруппа, бот добавлен в неё администратором, и у него есть права "
+            "«изменение профиля группы», «приглашение пользователей» и «удаление сообщений». "
+            "Идентификатор супергруппы выглядит как -1001234567890."
+        )
+
+    resolved_id, chat_title = found
     existing = (
-        await session.execute(sa.select(MeetingRoom).where(MeetingRoom.chat_id == chat_id))
+        await session.execute(sa.select(MeetingRoom).where(MeetingRoom.chat_id == resolved_id))
     ).scalar_one_or_none()
     if existing is not None:
         await check(session, existing)
         return existing
 
-    if not title:
-        try:
-            chat = await get_bot().get_chat(chat_id)
-            title = chat.title or f"Переговорка {chat_id}"
-        except (BotUnavailable, TelegramAPIError):
-            title = f"Переговорка {chat_id}"
-
-    room = MeetingRoom(chat_id=chat_id, title=title[:128], added_by=added_by)
+    room = MeetingRoom(
+        chat_id=resolved_id,
+        title=(title or chat_title)[:128],
+        added_by=added_by,
+        checked_at=datetime.now(UTC),
+    )
     session.add(room)
     await session.commit()
     await session.refresh(room)
-    await check(session, room)
     return room
+
+
+async def forget(session: AsyncSession, room: MeetingRoom) -> None:
+    """Убирает комнату из пула.
+
+    Сам чат живёт своей жизнью: бот из него не выходит и ничего в нём не
+    трогает — система просто перестаёт им распоряжаться. Занятую комнату
+    сначала освобождаем, иначе заявка осталась бы со ссылкой в никуда.
+    """
+    if room.status is RoomStatus.BUSY:
+        await release(session, room, kick_user_tg_id=None)
+    await session.execute(sa.delete(RoomMessage).where(RoomMessage.room_id == room.id))
+    await session.execute(
+        sa.update(OrganizerApplication)
+        .where(OrganizerApplication.room_id == room.id)
+        .values(room_id=None, invite_link=None)
+    )
+    await session.delete(room)
+    await session.commit()
 
 
 async def free_room(session: AsyncSession) -> MeetingRoom | None:

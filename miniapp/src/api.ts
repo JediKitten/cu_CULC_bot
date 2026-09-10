@@ -172,6 +172,7 @@ export const rooms = () => request<Room[]>("/api/admin/rooms");
 export const addRoom = (chatId: number, title?: string) =>
   post<Room>("/api/admin/rooms", { chat_id: chatId, title: title ?? null });
 export const checkRoom = (id: number) => post<void>(`/api/admin/rooms/${id}/check`);
+export const deleteRoom = (id: number) => del<void>(`/api/admin/rooms/${id}`);
 export const releaseRoom = (id: number) => post<void>(`/api/admin/rooms/${id}/release`);
 export const settings = () => request<Setting[]>("/api/admin/settings");
 export const saveSettings = (values: Record<string, unknown>) =>
