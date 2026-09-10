@@ -57,20 +57,20 @@ export function Events({
         <EventCard key={event.id} event={event} onOpen={() => onOpenEvent(event.id)} />
       ))}
 
-      <h2>Мероприятие ещё не назначено</h2>
-      {board.demands.length === 0 ? (
-        <p className="hint">
-          Пока ни одна книга не ждёт своей встречи. Отметьте на карточке книги, что хотите
-          её обсудить, — и она появится здесь.
-        </p>
-      ) : null}
-      {board.demands.map((demand) => (
-        <DemandRow
-          key={demand.book.id}
-          demand={demand}
-          onOpen={() => onOpenBook(demand.book.id!, !demand.joined)}
-        />
-      ))}
+      {/* Пустой раздел не показываем вовсе: заголовок с пояснением, под которым
+          ничего нет, только занимает экран и выглядит поломкой. */}
+      {board.demands.length > 0 && (
+        <>
+          <h2>Мероприятие ещё не назначено</h2>
+          {board.demands.map((demand) => (
+            <DemandRow
+              key={demand.book.id}
+              demand={demand}
+              onOpen={() => onOpenBook(demand.book.id!, !demand.joined)}
+            />
+          ))}
+        </>
+      )}
 
       <h2>Прошедшие</h2>
       {past === null ? (

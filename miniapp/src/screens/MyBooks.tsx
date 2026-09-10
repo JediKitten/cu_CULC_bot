@@ -24,6 +24,9 @@ export function MyBooks({
   const [filter, setFilter] = useState("");
   const [items, setItems] = useState<BookBrief[]>([]);
   const [loading, setLoading] = useState(true);
+  // Счётчик перезагрузок: смена отметки прямо в списке должна его обновлять,
+  // а повторная установка того же фильтра сама по себе эффект не запускает.
+  const [reloads, setReloads] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -33,7 +36,7 @@ export function MyBooks({
       .myBooks(filter && filter !== "liked" ? filter : undefined)
       .then((rows) => setItems(filter === "liked" ? rows.filter((b) => b.liked) : rows))
       .finally(() => setLoading(false));
-  }, [filter]);
+  }, [filter, reloads]);
 
   return (
     <div className="overlay">
@@ -70,8 +73,22 @@ export function MyBooks({
             key={book.id}
             book={book}
             onOpen={() => onOpenBook(book)}
-            onRead={() => api.markRead(book.id!).then(() => setFilter((f) => f))}
-            onWant={() => onOpenBook(book, true)}
+            onRead={() => api.markRead(book.id!).then(() => setReloads((n) => n + 1))}
+            onWant={() =>
+              (book.demanded ? api.dropDemand(book.id!) : api.addDemand(book.id!, [])).then(() =>
+                setReloads((n) => n + 1),
+              )
+            }
+            onScore={(stars) =>
+              api
+                .saveDiary(book.id!, {
+                  status: "finished",
+                  score: stars === null ? null : Math.round(stars * 2),
+                })
+                .then(() => setReloads((n) => n + 1))
+            }
+            onRefine={() => onOpenBook(book, true)}
+            onOrganize={() => onOpenBook(book, true)}
           />
         ))}
       </div>
