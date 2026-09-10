@@ -18,11 +18,13 @@ import asyncio
 import logging
 
 import httpx
+import sqlalchemy as sa
 
 from app.db import SessionLocal
+from app.models import Book
 from app.seed.books import SEED
 from app.services.books import google_books, merge, open_library
-from app.services.books.normalize import BookCandidate, norm
+from app.services.books.normalize import BookCandidate, dedup_key, norm
 
 logger = logging.getLogger("import_books")
 
@@ -46,10 +48,12 @@ def matches(candidate: BookCandidate, title: str, author: str) -> bool:
     return any(surname in norm(name) for name in candidate.authors)
 
 
-async def find(client: httpx.AsyncClient, title: str, author: str) -> BookCandidate | None:
+async def attempt(
+    client: httpx.AsyncClient, google_query: str, openlib_query: str, title: str, author: str
+) -> BookCandidate | None:
     results = await asyncio.gather(
-        google_books.search(client, f'intitle:"{title}" inauthor:"{author}"', 10),
-        open_library.search(client, f'title:"{title}" author:"{author}"', 10),
+        google_books.search(client, google_query, 10),
+        open_library.search(client, openlib_query, 10),
         return_exceptions=True,
     )
     groups = [r for r in results if not isinstance(r, BaseException)]
@@ -75,8 +79,45 @@ async def find(client: httpx.AsyncClient, title: str, author: str) -> BookCandid
     return best
 
 
-async def run(limit: int | None, dry_run: bool) -> None:
+async def find(client: httpx.AsyncClient, title: str, author: str) -> BookCandidate | None:
+    """Сначала точный запрос по полям, потом обычный.
+
+    Структурный поиск (`intitle:` / `title:`) точнее, но на русских названиях
+    источники нередко не находят по нему вообще ничего. Свободная строка
+    находит, зато тащит биографии и путеводители — их отсекает та же проверка
+    совпадения, что и в первом проходе.
+    """
+    found = await attempt(
+        client,
+        f'intitle:"{title}" inauthor:"{author}"',
+        f'title:"{title}" author:"{author}"',
+        title,
+        author,
+    )
+    if found is not None:
+        return found
+
+    plain = f"{title} {author}"
+    return await attempt(client, plain, plain, title, author)
+
+
+async def run(limit: int | None, dry_run: bool, only_missing: bool) -> None:
     books = SEED[:limit] if limit else SEED
+
+    if only_missing:
+        # Пропускаем то, что уже заведено: у Google Books дневная квота, и
+        # тратить её на повторный поиск известного незачем.
+        async with SessionLocal() as session:
+            known = set(
+                (await session.execute(sa.select(Book.dedup_key))).scalars().all()
+            )
+        books = tuple(
+            (author, title)
+            for author, title in books
+            if dedup_key(title, [author]) not in known
+        )
+        logger.info("К поиску осталось %d книг", len(books))
+
     client = merge.get_client()
 
     added = existing = missed = 0
@@ -125,13 +166,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Наполнить каталог стартовым списком")
     parser.add_argument("--limit", type=int, default=None, help="сколько книг из списка взять")
     parser.add_argument("--dry-run", action="store_true", help="только показать, что нашлось")
+    parser.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="искать только то, чего ещё нет в каталоге",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     # httpx рассказывает про каждый запрос — на двухстах книгах это четыреста
     # строк, в которых тонет то, ради чего скрипт запускали.
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    asyncio.run(run(args.limit, args.dry_run))
+    asyncio.run(run(args.limit, args.dry_run, args.only_missing))
 
 
 if __name__ == "__main__":
