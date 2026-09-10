@@ -17,6 +17,7 @@ export function BookRow({
   onRead,
   onWant,
   onScore,
+  onLike,
   onRefine,
   onOrganize,
   busy = false,
@@ -26,6 +27,7 @@ export function BookRow({
   onRead(): void;
   onWant(): void;
   onScore?(score: number | null): void;
+  onLike?(): void;
   onRefine?(): void;
   onOrganize?(): void;
   busy?: boolean;
@@ -78,7 +80,16 @@ export function BookRow({
           >
             {book.demanded ? "✓ Жду встречу" : "Хочу меро"}
           </button>
-          {book.liked && <span className="chip chip--on">♥</span>}
+          {onLike && (
+            <button
+              className={`chip ${book.liked ? "chip--on" : ""}`}
+              disabled={busy}
+              onClick={onLike}
+              aria-label={book.liked ? "Убрать из любимых" : "Нравится"}
+            >
+              {book.liked ? "♥" : "♡"}
+            </button>
+          )}
           {book.demand_count > 0 && (
             <span className="chip" title="Столько человек ждут встречу по этой книге">
               👥 {book.demand_count}

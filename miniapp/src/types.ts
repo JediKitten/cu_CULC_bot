@@ -231,7 +231,10 @@ export type BookRequest = {
 
 export type MyStats = {
   finished: number;
-  finished_this_year: number;
   avg_score: number | null;
   events_attended: number;
+  friends: number;
+  ratings: number;
+  /** Десять корзин: по одной на половину звезды, от 0,5 до 5. */
+  ratings_by_score: number[];
 };

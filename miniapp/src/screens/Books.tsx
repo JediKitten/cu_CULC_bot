@@ -118,6 +118,7 @@ export function Books({ onOpenBook }: { onOpenBook(book: BookBrief, want?: boole
           onRead={() => read(book)}
           onWant={() => want(book)}
           onScore={(stars) => score(book, stars)}
+          onLike={() => act(book, (id) => api.setLike(id, !book.liked))}
           onRefine={() => onOpenBook(book, true)}
           onOrganize={() => onOpenBook(book, true)}
         />

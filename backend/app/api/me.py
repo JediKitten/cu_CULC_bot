@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
 from app.db import get_session
-from app.models import Attendance, Book, Event, Participation, ReadingEntry
-from app.models.enums import ReadingStatus
+from app.models import Attendance, Book, Event, Friendship, Participation, ReadingEntry
+from app.models.enums import FriendshipStatus, ReadingStatus
 from app.schemas import BookBrief, EventOut
 from app.services import cards, eventcards
 
@@ -42,16 +42,16 @@ async def my_books(
 async def my_stats(
     user: CurrentUser, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> dict:
-    """Немного цифр для профиля: сколько прочитано всего и за год, средняя оценка."""
-    total, this_year, avg_score = (
+    """Цифры для профиля.
+
+    Средняя оценка отдаётся вместе с распределением: одно число говорит
+    мало — по нему не отличить того, кто всем ставит четвёрки, от того,
+    у кого половина книг любимые, а половина брошены.
+    """
+    total, avg_score = (
         await session.execute(
             sa.select(
                 sa.func.count().filter(ReadingEntry.status == ReadingStatus.FINISHED),
-                sa.func.count().filter(
-                    ReadingEntry.status == ReadingStatus.FINISHED,
-                    sa.extract("year", ReadingEntry.finished_on)
-                    == sa.extract("year", sa.func.current_date()),
-                ),
                 sa.func.avg(ReadingEntry.score),
             ).where(ReadingEntry.user_id == user.id)
         )
@@ -63,11 +63,35 @@ async def my_stats(
         )
     ).scalar_one()
 
+    friends = (
+        await session.execute(
+            sa.select(sa.func.count()).where(
+                Friendship.status == FriendshipStatus.ACCEPTED,
+                sa.or_(
+                    Friendship.from_user_id == user.id, Friendship.to_user_id == user.id
+                ),
+            )
+        )
+    ).scalar_one()
+
+    # Оценки в полубаллах 1..10 — десять корзин, по одной на половину звезды.
+    counts = dict(
+        (
+            await session.execute(
+                sa.select(ReadingEntry.score, sa.func.count())
+                .where(ReadingEntry.user_id == user.id, ReadingEntry.score.is_not(None))
+                .group_by(ReadingEntry.score)
+            )
+        ).all()
+    )
+
     return {
         "finished": total or 0,
-        "finished_this_year": this_year or 0,
         "avg_score": round(float(avg_score), 2) if avg_score is not None else None,
         "events_attended": attended or 0,
+        "friends": friends or 0,
+        "ratings": sum(counts.values()),
+        "ratings_by_score": [counts.get(score, 0) for score in range(1, 11)],
     }
 
 

@@ -8,7 +8,6 @@ import { EventDetail } from "./screens/EventDetail";
 import { Events } from "./screens/Events";
 import { Friends } from "./screens/Friends";
 import { PersonProfile } from "./screens/PersonProfile";
-import { MyBooks } from "./screens/MyBooks";
 import { Profile } from "./screens/Profile";
 import { initTelegram, insideTelegram } from "./telegram";
 import type { BookBrief, BookCard, Reference, User } from "./types";
@@ -35,7 +34,7 @@ export default function App() {
   const [openBook, setOpenBook] = useState<{ book: BookBrief; want: boolean } | null>(null);
   const [openEvent, setOpenEvent] = useState<number | null>(null);
   const [organizeFor, setOrganizeFor] = useState<BookCard | null>(null);
-  const [screen, setScreen] = useState<"none" | "books" | "friends" | "admin">("none");
+  const [screen, setScreen] = useState<"none" | "friends" | "admin">("none");
   const [openPerson, setOpenPerson] = useState<number | null>(null);
 
   useEffect(() => {
@@ -130,11 +129,10 @@ export default function App() {
         <Profile
           user={user}
           reference={reference}
-          onOpenBooks={() => setScreen("books")}
           onOpenFriends={() => setScreen("friends")}
           onOpenAdmin={() => setScreen("admin")}
           onOpenEvent={setOpenEvent}
-          onOpenBook={(book) => setOpenBook({ book, want: false })}
+          onOpenBook={(book, want = false) => setOpenBook({ book, want })}
         />
       )}
 
@@ -171,12 +169,6 @@ export default function App() {
         <EventDetail eventId={openEvent} onClose={() => setOpenEvent(null)} />
       )}
 
-      {screen === "books" && (
-        <MyBooks
-          onClose={() => setScreen("none")}
-          onOpenBook={(book, want = false) => setOpenBook({ book, want })}
-        />
-      )}
       {screen === "friends" && (
         <Friends onClose={() => setScreen("none")} onOpenPerson={setOpenPerson} />
       )}
