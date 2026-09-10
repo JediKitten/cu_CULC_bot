@@ -21,7 +21,7 @@ import httpx
 import sqlalchemy as sa
 
 from app.db import SessionLocal
-from app.models import Book
+from app.models import Book, BookSource
 from app.seed.books import SEED
 from app.services.books import google_books, merge, open_library
 from app.services.books.normalize import BookCandidate, dedup_key, norm
@@ -101,40 +101,87 @@ async def find(client: httpx.AsyncClient, title: str, author: str) -> BookCandid
     return await attempt(client, plain, plain, title, author)
 
 
-async def retitle() -> int:
+async def retitle() -> tuple[int, int]:
     """Приводит названия и авторов уже заведённых книг к выверенному списку.
 
     Отдельный проход, потому что первые прогоны сохраняли то, что отдал
     источник. Сети не требует: сопоставляем по нормализованному названию,
     той же меркой, что и при поиске.
+
+    Попутно вскрываются дубли: одна книга, заведённая дважды под разными
+    написаниями автора, после приведения к списку получает один и тот же
+    ключ. Лишнюю запись убираем, перевесив на оставшуюся привязки к
+    источникам, — но только если с ней никто ничего не делал.
     """
-    fixed = 0
+    fixed = merged = 0
     async with SessionLocal() as session:
         books = list((await session.execute(sa.select(Book))).scalars().all())
+        by_id = {book.id: book for book in books}
 
         for author, title in SEED:
             wanted = norm(title)
             surname = norm(author).split()[-1]
-            match = next(
-                (
-                    book
-                    for book in books
-                    if norm(book.title).startswith(wanted)
-                    and any(surname in norm(name) for name in (book.authors or []))
-                ),
-                None,
-            )
-            if match is None or (match.title == title and (match.authors or [None])[0] == author):
+            found = [
+                book
+                for book in books
+                if book.id in by_id
+                and norm(book.title).startswith(wanted)
+                and any(surname in norm(name) for name in (book.authors or []))
+            ]
+            if not found:
                 continue
 
-            match.title = title
-            match.authors = [author]
-            match.dedup_key = dedup_key(title, [author])
+            keeper, *duplicates = found
+            key = dedup_key(title, [author])
+
+            for extra in duplicates:
+                if await has_traces(session, extra.id):
+                    logger.info(
+                        "! дубль «%s» оставлен: с ним уже работали", extra.title
+                    )
+                    continue
+                await session.execute(
+                    sa.update(BookSource)
+                    .where(BookSource.book_id == extra.id)
+                    .values(book_id=keeper.id)
+                )
+                await session.delete(extra)
+                by_id.pop(extra.id, None)
+                merged += 1
+                logger.info("− склеен дубль: %s", extra.title)
+
+            if keeper.title == title and (keeper.authors or [None])[0] == author:
+                continue
+
+            keeper.title = title
+            keeper.authors = [author]
+            keeper.dedup_key = key
             fixed += 1
             logger.info("~ %s — %s", author, title)
+            # Пишем сразу: столкновение ключей должно всплыть на своей книге,
+            # а не обрушить весь проход в самом конце.
+            await session.flush()
 
         await session.commit()
-    return fixed
+    return fixed, merged
+
+
+async def has_traces(session, book_id: int) -> bool:
+    """Есть ли у книги следы человеческой работы — отметки, спрос, встречи."""
+    for table, column in (
+        ("reading_entries", "book_id"),
+        ("demands", "book_id"),
+        ("events", "book_id"),
+        ("organizer_applications", "book_id"),
+    ):
+        count = (
+            await session.execute(
+                sa.text(f"SELECT count(*) FROM {table} WHERE {column} = :id"), {"id": book_id}
+            )
+        ).scalar_one()
+        if count:
+            return True
+    return False
 
 
 async def run(limit: int | None, dry_run: bool, only_missing: bool) -> None:
@@ -225,7 +272,8 @@ def main() -> None:
     # строк, в которых тонет то, ради чего скрипт запускали.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     if args.retitle:
-        logger.info("Поправлено книг: %d", asyncio.run(retitle()))
+        fixed, merged = asyncio.run(retitle())
+        logger.info("Поправлено книг: %d, склеено дублей: %d", fixed, merged)
         return
     asyncio.run(run(args.limit, args.dry_run, args.only_missing))
 
