@@ -149,6 +149,8 @@ class BookCard(BookBrief):
     my_started_on: date | None = None
     my_finished_on: date | None = None
     open_event_id: int | None = None
+    open_event_status: EventStatus | None = None
+    open_event_organizer: str | None = None
     my_application_status: ApplicationStatus | None = None
 
 
@@ -233,7 +235,15 @@ class DemandCardOut(BaseModel):
     types: list[DemandTypeCount]
     joined: bool
     has_application: bool
+    hosts: list["HostOut"] = []
     last_demand_at: datetime | None = None
+
+
+class HostOut(BaseModel):
+    """Кто вызвался провести встречу по книге и на какой стадии его заявка."""
+
+    name: str
+    status: ApplicationStatus
 
 
 # --- Заявки организаторов ----------------------------------------------------
@@ -385,6 +395,8 @@ class BoardOut(BaseModel):
 
     events: list[EventOut]
     demands: list[DemandCardOut]
+    # Одобренные встречи, где ведущий ещё выбирает время.
+    preparing: list[EventOut] = []
 
 
 class VoteIn(BaseModel):

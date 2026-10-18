@@ -100,6 +100,8 @@ export type BookCard = BookBrief & {
   my_started_on: string | null;
   my_finished_on: string | null;
   open_event_id: number | null;
+  open_event_status: EventStatus | null;
+  open_event_organizer: string | null;
   my_application_status: ApplicationStatus | null;
 };
 
@@ -183,10 +185,11 @@ export type DemandCard = {
   types: DemandTypeCount[];
   joined: boolean;
   has_application: boolean;
+  hosts: { name: string; status: ApplicationStatus }[];
   last_demand_at: string | null;
 };
 
-export type Board = { events: ClubEvent[]; demands: DemandCard[] };
+export type Board = { events: ClubEvent[]; demands: DemandCard[]; preparing?: ClubEvent[] };
 
 export type SurveyQuestion = {
   key: string;

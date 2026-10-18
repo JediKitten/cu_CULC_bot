@@ -115,3 +115,48 @@ async def test_moderator_has_no_access_to_events(client, session):
     books = await client.get("/api/admin/book-requests", headers=auth(moderator))
     assert books.status_code == 200
 
+
+async def test_board_shows_preparing_events_and_hosts(client, session):
+    """Пока ведущий выбирает время, встреча видна всем как «готовится», а у
+    книги, по которой только подали заявку, видно, кто вызвался вести."""
+    from tests.test_flow import make_book, type_ids
+
+    admin = await member(client, SUPERADMIN_TG_ID, "Оргкомитет")
+    organizer = await member(client, 3011, "Анна Ведущая")
+    candidate = await member(client, 3012, "Борис Кандидат")
+    reader = await member(client, 3013, "Читатель")
+    first = await make_book(session, "Солярис", ["Станислав Лем"])
+    second = await make_book(session, "Эдем", ["Станислав Лем"])
+    type_id = (await type_ids(client, organizer))[0]
+    answers = {"read": True, "experience": "Пару раз", "idea": "Поговорим"}
+
+    application = await client.post(
+        "/api/applications",
+        json={"book_id": first.id, "event_type_id": type_id, "answers": answers},
+        headers=auth(organizer),
+    )
+    await client.post(
+        f"/api/applications/{application.json()['id']}/approve",
+        json={"audience": []},
+        headers=auth(admin),
+    )
+    await client.post(
+        f"/api/books/{second.id}/demand", json={"event_type_ids": []}, headers=auth(reader)
+    )
+    await client.post(
+        "/api/applications",
+        json={"book_id": second.id, "event_type_id": type_id, "answers": answers},
+        headers=auth(candidate),
+    )
+
+    board = (await client.get("/api/board", headers=auth(reader))).json()
+
+    assert [event["book"]["title"] for event in board["preparing"]] == ["Солярис"]
+    assert board["preparing"][0]["organizer_name"] == "Анна Ведущая"
+    assert board["events"] == []
+    card = next(item for item in board["demands"] if item["book"]["id"] == second.id)
+    assert card["hosts"] == [{"name": "Борис Кандидат", "status": "submitted"}]
+
+    book = (await client.get(f"/api/books/{first.id}", headers=auth(reader))).json()
+    assert book["open_event_status"] == "slot_selection"
+    assert book["open_event_organizer"] == "Анна Ведущая"

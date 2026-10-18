@@ -261,7 +261,13 @@ export function BookDetail({
         <h2>Встреча по этой книге</h2>
         {card.open_event_id ? (
           <div className="card card--live">
-            <p>По этой книге уже назначена встреча.</p>
+            <p>
+              {card.open_event_status === "slot_selection"
+                ? `Встреча готовится${card.open_event_organizer ? ` — ведёт ${card.open_event_organizer}` : ""}. Скоро откроется голосование за время.`
+                : card.open_event_status === "voting"
+                  ? "По этой книге выбирают время встречи — проголосуйте."
+                  : "По этой книге уже назначена встреча."}
+            </p>
             <button className="primary" onClick={() => onOpenEvent(card.open_event_id!)}>
               Открыть встречу
             </button>

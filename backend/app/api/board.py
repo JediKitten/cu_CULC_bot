@@ -17,16 +17,21 @@ router = APIRouter(prefix="/api", tags=["board"])
 async def board(
     user: CurrentUser, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> BoardOut:
-    """Афиша целиком: сверху встречи, под ними спрос.
+    """Афиша целиком: сверху встречи, под ними готовящиеся, ниже спрос.
 
     Один запрос на всю вкладку — два яруса одного списка, а не две страницы.
     """
     events = await eventcards.visible_events(
         session, user, (EventStatus.VOTING, EventStatus.SCHEDULED)
     )
+    preparing = await eventcards.visible_events(session, user, (EventStatus.SLOT_SELECTION,))
     return BoardOut(
         events=[await eventcards.event_out(session, event, user) for event in events],
         demands=await eventcards.demand_cards(session, user),
+        preparing=[
+            await eventcards.event_out(session, event, user, with_slots=False)
+            for event in preparing
+        ],
     )
 
 
