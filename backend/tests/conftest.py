@@ -9,6 +9,7 @@ import hmac
 import json
 import time
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import pytest
@@ -206,3 +207,10 @@ async def guest(client, tg_id: int, name: str) -> str:
 
 def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def in_days(days: int, hour: int = 18) -> str:
+    """Время слота через столько-то дней. Даты в тестах нельзя зашивать:
+    сервер не принимает окна в прошлом, и тест сломается сам по себе."""
+    moment = datetime.now(UTC).replace(hour=hour, minute=0, second=0, microsecond=0)
+    return (moment + timedelta(days=days)).isoformat()

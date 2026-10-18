@@ -32,7 +32,7 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
         setChosen(loaded.slots.filter((slot) => slot.my_vote).map((slot) => slot.id));
         // Список идущих грузим сразу: ведущему он нужен всегда, а отдельная
         // кнопка «показать» была лишним шагом — и однажды просто не работала.
-        if (loaded.my_event) {
+        if (loaded.can_manage) {
           api.eventPeople(eventId).then(setPeople).catch(() => setPeople([]));
         }
       })
@@ -77,7 +77,13 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
       <div className="overlay">
         <Head onClose={onClose} title={event.book.title} />
         <div className="screen">
-          {event.my_event ? (
+          {event.can_manage && !event.my_event && (
+            <p className="notice">
+              Окна выбирает ведущий — {event.organizer_name}. Если он прислал их в форум,
+              можно расставить их здесь за него.
+            </p>
+          )}
+          {event.can_manage ? (
             <SlotBuilder
               event={event}
               onDone={(next) => setEvent(next)}
@@ -87,6 +93,7 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
             <p className="hint">Ведущий ещё выбирает, когда сможет провести встречу.</p>
           )}
           {error && <p className="error">{error}</p>}
+          <Manage event={event} busy={busy} onCancel={(reason) => run(api.cancelEvent(event.id, reason))} />
         </div>
       </div>
     );
@@ -144,11 +151,12 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
               </button>
             ))}
 
-            {event.my_event && (
+            {event.can_manage && (
               <div className="card" style={{ marginTop: 12 }}>
                 <p className="hint">
-                  Вы ведущий: можете закрепить время, не дожидаясь конца голосования, —
-                  например, если знаете про занятый зал или сессию.
+                  {event.my_event ? "Вы ведущий" : "Вы в оргкомитете"}: можно закрепить время,
+                  не дожидаясь конца голосования, — например, если известно про занятый зал
+                  или сессию.
                 </p>
                 {event.slots.map((slot) => (
                   <button
@@ -233,9 +241,9 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
             )}
             {event.attended && <p className="notice">Вы отмечены на встрече. Хорошего вечера!</p>}
 
-            {event.my_event && (
+            {event.can_manage && (
               <div className="card">
-                <h2 style={{ marginTop: 0 }}>Ведущему</h2>
+                <h2 style={{ marginTop: 0 }}>{event.my_event ? "Ведущему" : "Управление"}</h2>
                 {shownCode ? (
                   <div className="big-code">{shownCode}</div>
                 ) : event.code_available ? (
@@ -258,6 +266,31 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
                   </p>
                 )}
 
+                {event.slots.length > 1 && (
+                  <details style={{ marginTop: 12 }}>
+                    <summary className="link">Перенести на другое окно</summary>
+                    <p className="hint">
+                      Записавшимся придёт уведомление, их отметки «иду» сбросятся.
+                    </p>
+                    {event.slots
+                      .filter((slot) => slot.starts_at !== event.starts_at)
+                      .map((slot) => (
+                        <button
+                          key={slot.id}
+                          className="ghost"
+                          style={{ width: "100%", marginBottom: 6 }}
+                          disabled={busy}
+                          onClick={() => {
+                            if (confirm(`Перенести встречу на ${dateTimeLabel(slot.starts_at)}?`)) {
+                              run(api.decideSlot(event.id, slot.id));
+                            }
+                          }}
+                        >
+                          {dateTimeLabel(slot.starts_at)} · голосов {slot.votes}
+                        </button>
+                      ))}
+                  </details>
+                )}
               </div>
             )}
           </>
@@ -290,7 +323,7 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
           <p className="notice">Встреча отменена. {event.cancel_reason}</p>
         )}
 
-        {event.my_event && people !== null && (
+        {event.can_manage && people !== null && (
           <section style={{ marginTop: 18 }}>
             <button
               className="section__head"
@@ -330,7 +363,64 @@ export function EventDetail({ eventId, onClose }: { eventId: number; onClose(): 
               ))}
           </section>
         )}
+
+        <Manage
+          event={event}
+          busy={busy}
+          onCancel={(reason) => run(api.cancelEvent(event.id, reason))}
+        />
       </div>
+    </div>
+  );
+}
+
+/** Нижний блок для ведущего и оргкомитета: тема в форуме и отмена.
+ *
+ * Отмена только у оргкомитета: ведущему, который не может провести встречу,
+ * проще написать в тему, чем решать за клуб в одиночку.
+ */
+function Manage({
+  event,
+  busy,
+  onCancel,
+}: {
+  event: ClubEvent;
+  busy: boolean;
+  onCancel(reason: string): void;
+}) {
+  if (!event.can_manage) return null;
+  const live = ["slot_selection", "voting", "scheduled"].includes(event.status);
+  if (!live && !event.topic_link) return null;
+
+  return (
+    <div className="card" style={{ marginTop: 18 }}>
+      {event.topic_link ? (
+        <a className="link" href={event.topic_link}>
+          💬 Тема встречи в форуме оргкомитета
+        </a>
+      ) : (
+        live && (
+          <p className="hint" style={{ margin: 0 }}>
+            Темы в форуме у этой встречи нет. Открыть её можно в оргкомитете, во вкладке
+            «Встречи».
+          </p>
+        )
+      )}
+      {event.is_admin && live && (
+        <button
+          className="ghost danger"
+          style={{ width: "100%", marginTop: 12 }}
+          disabled={busy}
+          onClick={() => {
+            const reason = prompt(
+              "Почему отменяем? Причину увидят ведущий, записавшиеся и голосовавшие.",
+            );
+            if (reason && reason.trim().length >= 3) onCancel(reason.trim());
+          }}
+        >
+          Отменить встречу
+        </button>
+      )}
     </div>
   );
 }

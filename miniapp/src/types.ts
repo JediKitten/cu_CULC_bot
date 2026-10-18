@@ -141,7 +141,40 @@ export type ClubEvent = {
   my_feedback_score: number | null;
   code_available: boolean;
   cancel_reason: string | null;
+  can_manage: boolean;
+  is_admin: boolean;
+  topic_link: string | null;
 };
+
+export type AdminEvent = {
+  id: number;
+  book: BookBrief;
+  event_type_title: string;
+  organizer_id: number;
+  organizer_name: string;
+  organizer_username: string | null;
+  status: EventStatus;
+  audience: MemberKind[];
+  vote_deadline: string | null;
+  starts_at: string | null;
+  going: number;
+  voters: number;
+  application_id: number | null;
+  topic_link: string | null;
+  cancel_reason: string | null;
+};
+
+export type Topic = {
+  application_id: number;
+  book: BookBrief;
+  user_name: string;
+  application_status: ApplicationStatus;
+  event_id: number | null;
+  event_status: EventStatus | null;
+  link: string | null;
+};
+
+export type EventTypeItem = { id: number; title: string; status: string };
 
 export type DemandCard = {
   book: BookBrief;
@@ -178,6 +211,7 @@ export type Application = {
   audience: MemberKind[];
   room_title: string | null;
   invite_link: string | null;
+  topic_link: string | null;
   decision_comment: string | null;
   created_at: string;
   event_id: number | null;
@@ -213,7 +247,7 @@ export type Room = {
   chat_id: number;
   title: string;
   status: "free" | "busy" | "disabled";
-  application_id: number | null;
+  topics: number;
   checked_at: string | null;
   check_error: string | null;
 };

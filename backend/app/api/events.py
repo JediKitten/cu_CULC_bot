@@ -10,11 +10,11 @@ from app.models import Attendance, Event, EventFeedback, Participation, User
 from app.models.enums import (
     AttendanceMethod,
     DecidedBy,
-    EventStatus,
     UserRole,
 )
 from app.schemas import (
     AttendanceIn,
+    CancelIn,
     DecideIn,
     EventOut,
     FeedbackIn,
@@ -46,8 +46,11 @@ async def publish_slots(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EventOut:
-    """Организатор расставляет окна и открывает голосование."""
-    event = await _mine(session, event_id, user)
+    """Организатор расставляет окна и открывает голосование.
+
+    Администратор может сделать это за него — когда ведущий прислал окна
+    в форум, а не в приложение."""
+    event = await _mine(session, event_id, user, allow_admin=True)
     event.title = body.title or event.title
     event.description = body.description or event.description
     event.capacity = body.capacity
@@ -210,17 +213,14 @@ async def participants(
 @router.post("/{event_id}/cancel", response_model=EventOut)
 async def cancel(
     event_id: int,
-    body: DecideIn | None = None,
-    *,
+    body: CancelIn,
     user: RequireAdmin,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EventOut:
     event = await session.get(Event, event_id)
     if event is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
-    event.status = EventStatus.CANCELLED
-    event.cancel_reason = (body.note if body else None) or "Без указания причины"
-    await session.commit()
+    await service.cancel(session, event, reason=body.reason.strip(), by=user)
     return await eventcards.event_out(session, event, user)
 
 

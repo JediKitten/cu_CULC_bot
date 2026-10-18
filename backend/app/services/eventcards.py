@@ -18,10 +18,26 @@ from app.models import (
     SlotVote,
     User,
 )
-from app.models.enums import ApplicationStatus, EventStatus, MemberKind
+from app.models.enums import ApplicationStatus, EventStatus, MemberKind, UserRole
 from app.schemas import BookBrief, DemandCardOut, DemandTypeCount, EventOut, SlotOut
-from app.services import cards, people
+from app.services import cards, people, rooms
 from app.services import events as events_service
+
+
+async def topic_link_of(session: AsyncSession, application_id: int | None) -> str | None:
+    """Ссылка на тему заявки в форуме оргкомитета, если она жива."""
+    if application_id is None:
+        return None
+    from app.models import MeetingRoom
+
+    row = (
+        await session.execute(
+            sa.select(MeetingRoom.chat_id, OrganizerApplication.topic_id)
+            .join(MeetingRoom, MeetingRoom.id == OrganizerApplication.room_id)
+            .where(OrganizerApplication.id == application_id)
+        )
+    ).one_or_none()
+    return rooms.topic_link(row[0], row[1]) if row else None
 
 
 async def slots_of(
@@ -81,6 +97,8 @@ async def event_out(
             )
         )
     ).scalar_one_or_none()
+    is_admin = user.role.rank >= UserRole.ADMIN.rank
+    can_manage = is_admin or event.organizer_user_id == user.id
 
     return EventOut(
         id=event.id,
@@ -110,6 +128,9 @@ async def event_out(
         my_feedback_score=feedback,
         code_available=events_service.code_available(slot),
         cancel_reason=event.cancel_reason,
+        can_manage=can_manage,
+        is_admin=is_admin,
+        topic_link=await topic_link_of(session, event.application_id) if can_manage else None,
     )
 
 

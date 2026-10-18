@@ -11,7 +11,15 @@ from datetime import UTC, datetime, timedelta
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Attendance, Book, Event, EventSlot, Participation, User
+from app.models import (
+    Attendance,
+    Book,
+    Event,
+    EventSlot,
+    OrganizerApplication,
+    Participation,
+    User,
+)
 from app.models.enums import (
     DecidedBy,
     EventStatus,
@@ -20,7 +28,7 @@ from app.models.enums import (
     UserRole,
 )
 from app.services import events as events_service
-from app.services import notify
+from app.services import notify, rooms
 from app.services.settings import SettingsService
 
 logger = logging.getLogger(__name__)
@@ -155,11 +163,15 @@ async def warn_low_attendance(session: AsyncSession) -> int:
 
 
 async def close_past_events(session: AsyncSession) -> int:
-    """Переводит прошедшие встречи в «состоялась» и просит отзыв у тех, кто был."""
+    """Переводит прошедшие встречи в «состоялась» и просит отзыв у тех, кто был.
+
+    Здесь же убираем тему встречи из форума: договариваться больше не о чем.
+    """
     now = datetime.now(UTC)
     settings = SettingsService(session)
     delay = timedelta(hours=await settings.get("feedback_delay_hours"))
     closed = 0
+    finished: list[int] = []
 
     for event, slot, book in await _scheduled_with_time(session):
         ends_at = slot.starts_at + timedelta(minutes=slot.duration_minutes)
@@ -183,9 +195,17 @@ async def close_past_events(session: AsyncSession) -> int:
             dedup_prefix=f"feedback:{event.id}",
             payload=_payload(event, slot, book),
         )
+        if event.application_id is not None:
+            finished.append(event.application_id)
         closed += 1
 
     await session.commit()
+
+    # Сеть — после коммита: статус встречи важнее уборки, а уборка повторяема.
+    for application_id in finished:
+        application = await session.get(OrganizerApplication, application_id)
+        if application is not None:
+            await rooms.close_topic(session, application)
     return closed
 
 

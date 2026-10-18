@@ -165,10 +165,6 @@ export default function App() {
         />
       )}
 
-      {openEvent !== null && (
-        <EventDetail eventId={openEvent} onClose={() => setOpenEvent(null)} />
-      )}
-
       {screen === "friends" && (
         <Friends onClose={() => setScreen("none")} onOpenPerson={setOpenPerson} />
       )}
@@ -179,7 +175,20 @@ export default function App() {
           onOpenBook={(book) => setOpenBook({ book, want: false })}
         />
       )}
-      {screen === "admin" && <Admin role={user.role} onClose={() => setScreen("none")} />}
+      {screen === "admin" && (
+        <Admin
+          role={user.role}
+          onClose={() => setScreen("none")}
+          onOpenEvent={setOpenEvent}
+          eventOpen={openEvent !== null}
+        />
+      )}
+
+      {/* Карточка встречи — после оргкомитета: её открывают и оттуда, и она
+          должна лечь поверх. */}
+      {openEvent !== null && (
+        <EventDetail eventId={openEvent} onClose={() => setOpenEvent(null)} />
+      )}
 
       <nav className="tabs">
         {TABS.map((item) => (

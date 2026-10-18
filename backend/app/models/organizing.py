@@ -9,12 +9,13 @@ from app.models.enums import ApplicationStatus, MemberKind, RoomStatus, enum_col
 
 
 class MeetingRoom(Base, CreatedAtMixin):
-    """«Переговорка» — заранее созданная человеком супергруппа, где бот админ.
+    """Форум оргкомитета — супергруппа с темами, где бот администратор.
 
-    Бот не умеет создавать чаты: в Bot API нет такого метода, добавлять людей
-    в чат он тоже не может. Поэтому оргкомитет один раз руками заводит пул
-    пустых групп, а бот раздаёт их заявкам: переименовывает, зовёт кандидата
-    одноразовой ссылкой, по завершении выселяет его и возвращает комнату в пул.
+    Бот не умеет создавать чаты, зато умеет заводить темы. Поэтому группу
+    один раз создаёт человек, а бот под каждую заявку открывает в ней тему и
+    удаляет её, когда встреча прошла или не состоялась. Подробности — в
+    services/rooms.py. Таблица называется по-старому: раньше здесь был пул
+    отдельных чатов-«переговорок».
     """
 
     __tablename__ = "meeting_rooms"
@@ -22,38 +23,14 @@ class MeetingRoom(Base, CreatedAtMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     chat_id: Mapped[int] = mapped_column(sa.BigInteger, unique=True)
     title: Mapped[str] = mapped_column(sa.String(128))
+    # free — рабочий, disabled — отключён. busy остался от пула чатов.
     status: Mapped[RoomStatus] = mapped_column(
         enum_col(RoomStatus, "room_status"), default=RoomStatus.FREE, server_default="free"
-    )
-    # Заявка, которая сейчас занимает комнату. use_alter: ссылки
-    # meeting_rooms → organizer_applications → meeting_rooms образуют цикл.
-    current_application_id: Mapped[int | None] = mapped_column(
-        sa.ForeignKey("organizer_applications.id", use_alter=True)
     )
     added_by: Mapped[int | None] = mapped_column(sa.ForeignKey("users.id"))
     # Когда бот последний раз убедился, что он здесь админ с нужными правами.
     checked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     check_error: Mapped[str | None] = mapped_column(sa.Text)
-
-
-class RoomMessage(Base):
-    """Id сообщений в переговорке, чтобы вычистить её перед следующим гостем.
-
-    Бот запоминает и свои сообщения, и чужие (для этого у него выключен privacy
-    mode). Полной гарантии нет: что не удалилось, оргкомитет чистит руками.
-    """
-
-    __tablename__ = "room_messages"
-    __table_args__ = (sa.UniqueConstraint("room_id", "message_id", name="uq_room_message"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    room_id: Mapped[int] = mapped_column(
-        sa.ForeignKey("meeting_rooms.id", ondelete="CASCADE"), index=True
-    )
-    message_id: Mapped[int]
-    sent_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), server_default=sa.func.now()
-    )
 
 
 class OrganizerApplication(Base, CreatedAtMixin):
@@ -87,6 +64,8 @@ class OrganizerApplication(Base, CreatedAtMixin):
         server_default="submitted",
     )
     room_id: Mapped[int | None] = mapped_column(sa.ForeignKey("meeting_rooms.id"))
+    # Тема в форуме (message_thread_id). Пусто — темы нет или её уже удалили.
+    topic_id: Mapped[int | None] = mapped_column(sa.Integer)
     invite_link: Mapped[str | None] = mapped_column(sa.String(512))
     chat_opened_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     # Кому встреча будет доступна. Заполняется администратором при одобрении;

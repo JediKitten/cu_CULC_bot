@@ -4,7 +4,7 @@ import sqlalchemy as sa
 
 from app.models import Book, Demand
 from app.services.books.normalize import dedup_key
-from tests.conftest import SUPERADMIN_TG_ID, auth, member
+from tests.conftest import SUPERADMIN_TG_ID, auth, in_days, member
 
 
 async def make_book(session, title="Понедельник начинается в субботу", authors=None) -> Book:
@@ -105,8 +105,8 @@ async def test_full_scenario(client, session):
         f"/api/events/{event_id}/slots",
         json={
             "slots": [
-                {"starts_at": "2026-10-01T18:00:00+03:00", "place": "Библиотека"},
-                {"starts_at": "2026-10-03T15:00:00+03:00", "place": "Читальня"},
+                {"starts_at": in_days(10), "place": "Библиотека"},
+                {"starts_at": in_days(12, 12), "place": "Читальня"},
             ],
             "title": "НИИЧАВО и мы",
             "vote_days": 3,
@@ -285,7 +285,7 @@ async def test_organizer_sees_who_is_going(client, session):
 
     slots = await client.post(
         f"/api/events/{event_id}/slots",
-        json={"slots": [{"starts_at": "2026-12-01T18:00:00+03:00"}]},
+        json={"slots": [{"starts_at": in_days(20)}]},
         headers=auth(organizer),
     )
     await client.post(

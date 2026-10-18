@@ -10,7 +10,7 @@ from app.models.event import (
     Participation,
     SlotVote,
 )
-from app.models.organizing import MeetingRoom, OrganizerApplication, RoomMessage
+from app.models.organizing import MeetingRoom, OrganizerApplication
 from app.models.system import AuditLog, Notification, Setting
 from app.models.user import Friendship, Profile, ProfileEventType, User
 
@@ -36,7 +36,6 @@ __all__ = [
     "Profile",
     "ProfileEventType",
     "ReadingEntry",
-    "RoomMessage",
     "Setting",
     "SlotVote",
     "User",

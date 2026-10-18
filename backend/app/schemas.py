@@ -260,9 +260,15 @@ class ApplicationOut(BaseModel):
     audience: list[MemberKind] = []
     room_title: str | None = None
     invite_link: str | None = None
+    topic_link: str | None = None
     decision_comment: str | None = None
     created_at: datetime
     event_id: int | None = None
+
+
+class CancelIn(BaseModel):
+    # Причину увидят все, кого встреча касалась, — без неё отмена выглядит как сбой.
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class ApproveIn(BaseModel):
@@ -334,6 +340,44 @@ class EventOut(BaseModel):
     # Код присутствия показываем только вокруг самой встречи.
     code_available: bool = False
     cancel_reason: str | None = None
+    # Ведущий или оргкомитет: показываем инструменты ведущего.
+    can_manage: bool = False
+    # Только оргкомитет: отмена и прочее, чего ведущему не положено.
+    is_admin: bool = False
+    # Тема встречи в форуме оргкомитета — тем, кто может управлять встречей.
+    topic_link: str | None = None
+
+
+class AdminEventOut(BaseModel):
+    """Строка списка встреч в панели оргкомитета."""
+
+    id: int
+    book: BookBrief
+    event_type_title: str
+    organizer_id: int
+    organizer_name: str
+    organizer_username: str | None = None
+    status: EventStatus
+    audience: list[MemberKind] = []
+    vote_deadline: datetime | None = None
+    starts_at: datetime | None = None
+    going: int = 0
+    voters: int = 0
+    application_id: int | None = None
+    topic_link: str | None = None
+    cancel_reason: str | None = None
+
+
+class TopicOut(BaseModel):
+    """Живая тема в форуме оргкомитета."""
+
+    application_id: int
+    book: BookBrief
+    user_name: str
+    application_status: ApplicationStatus
+    event_id: int | None = None
+    event_status: EventStatus | None = None
+    link: str | None = None
 
 
 class BoardOut(BaseModel):
@@ -408,7 +452,7 @@ class RoomOut(BaseModel):
     chat_id: int
     title: str
     status: RoomStatus
-    application_id: int | None = None
+    topics: int = 0
     checked_at: datetime | None = None
     check_error: str | None = None
 

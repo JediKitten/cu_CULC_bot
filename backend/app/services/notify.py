@@ -91,12 +91,18 @@ def render(kind: NotificationKind, payload: dict) -> str | None:
                 "Откройте переговорку в приложении, чтобы обсудить детали."
             )
         case NotificationKind.APPLICATION_CHAT_OPEN:
-            link = payload.get("invite_link")
-            tail = f"\n\n{link}" if link else ""
-            return (
-                f"💬 Оргкомитет готов обсудить вашу встречу\n\n{book}\n\n"
-                f"Заходите в чат по ссылке — она одноразовая и скоро истечёт.{tail}"
-            )
+            invite = payload.get("invite_link")
+            topic = payload.get("topic_link")
+            if invite:
+                tail = (
+                    "Заходите в форум оргкомитета по ссылке — она одноразовая и скоро "
+                    f"истечёт. Ваша тема называется по книге.\n\n{invite}"
+                )
+            else:
+                tail = "Для вас открыта тема в форуме оргкомитета." + (
+                    f"\n\n{topic}" if topic else ""
+                )
+            return f"💬 Оргкомитет готов обсудить вашу встречу\n\n{book}\n\n{tail}"
         case NotificationKind.APPLICATION_APPROVED:
             return (
                 f"✅ Заявку одобрили\n\n{book}\nФормат: {event_type}\n\n"
@@ -109,8 +115,9 @@ def render(kind: NotificationKind, payload: dict) -> str | None:
             return f"❌ Заявку отклонили\n\n{book}{tail}"
         case NotificationKind.NO_FREE_ROOM:
             return (
-                "⚠️ Нет свободных переговорок\n\n"
-                f"{book}: заявка ждёт чата. Освободите комнату или добавьте новую."
+                "⚠️ Переговорка не открылась\n\n"
+                f"{book}: заявка ждёт темы в форуме. Проверьте в приложении, что форум "
+                "подключён и у бота хватает прав."
             )
         case NotificationKind.SLOT_VOTING_OPEN:
             return (

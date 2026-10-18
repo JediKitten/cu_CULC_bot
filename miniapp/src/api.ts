@@ -1,5 +1,6 @@
 import { getInitData } from "./telegram";
 import type {
+  AdminEvent,
   Application,
   Board,
   BookCard,
@@ -7,6 +8,7 @@ import type {
   BookRequest,
   BookSearch,
   ClubEvent,
+  EventTypeItem,
   Friends,
   MyStats,
   PersonBrief,
@@ -16,6 +18,7 @@ import type {
   Room,
   Setting,
   SurveyQuestion,
+  Topic,
   User,
 } from "./types";
 
@@ -139,8 +142,12 @@ export const applyToOrganize = (body: unknown) => post<Application>("/api/applic
 export const myApplications = () => request<Application[]>("/api/applications/mine");
 export const withdrawApplication = (id: number) =>
   post<void>(`/api/applications/${id}/withdraw`);
-export const applications = () => request<Application[]>("/api/applications");
+export const applications = (statuses?: string[]) =>
+  request<Application[]>(
+    `/api/applications${statuses?.length ? "?" + statuses.map((s) => `status=${s}`).join("&") : ""}`,
+  );
 export const openRoom = (id: number) => post<Application>(`/api/applications/${id}/open-room`);
+export const closeRoom = (id: number) => post<Application>(`/api/applications/${id}/close-room`);
 export const approveApplication = (id: number, body: unknown) =>
   post<Application>(`/api/applications/${id}/approve`, body);
 export const rejectApplication = (id: number, comment: string) =>
@@ -167,6 +174,8 @@ export const eventPeople = (id: number) =>
   request<{ id: number; name: string; state: string }[]>(`/api/events/${id}/people`);
 export const sendFeedback = (id: number, body: unknown) =>
   post<ClubEvent>(`/api/events/${id}/feedback`, body);
+export const cancelEvent = (id: number, reason: string) =>
+  post<ClubEvent>(`/api/events/${id}/cancel`, { reason });
 
 // --- Личное ------------------------------------------------------------------
 
@@ -197,7 +206,11 @@ export const addRoom = (chatId: number, title?: string) =>
   post<Room>("/api/admin/rooms", { chat_id: chatId, title: title ?? null });
 export const checkRoom = (id: number) => post<void>(`/api/admin/rooms/${id}/check`);
 export const deleteRoom = (id: number) => del<void>(`/api/admin/rooms/${id}`);
-export const releaseRoom = (id: number) => post<void>(`/api/admin/rooms/${id}/release`);
+export const topics = () => request<Topic[]>("/api/admin/topics");
+export const adminEvents = () => request<AdminEvent[]>("/api/admin/events");
+export const eventTypes = () => request<EventTypeItem[]>("/api/admin/event-types");
+export const createEventType = (title: string) =>
+  post<{ id: number; title: string }>("/api/admin/event-types", { title });
 export const settings = () => request<Setting[]>("/api/admin/settings");
 export const saveSettings = (values: Record<string, unknown>) =>
   put<Record<string, unknown>>("/api/admin/settings", values);
