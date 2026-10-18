@@ -23,18 +23,51 @@ const KINDS: MemberKind[] = ["applicant", "bachelor", "master", "staff", "guest"
 
 type Tab = "Встречи" | "Заявки" | "Книги" | "Форум" | "Роли" | "Настройки" | "Аналитика";
 
-const TABS: Tab[] = ["Встречи", "Заявки", "Книги", "Форум", "Роли", "Настройки", "Аналитика"];
+/** Что видно какой роли. Модератору показывать вкладки, которые ответят ему
+ * отказом, — значит заставлять гадать, сломано ли что-то. */
+const TABS_BY_ROLE: Record<string, Tab[]> = {
+  moderator: ["Книги"],
+  admin: ["Встречи", "Заявки", "Книги", "Форум", "Роли", "Настройки", "Аналитика"],
+  superadmin: ["Встречи", "Заявки", "Книги", "Форум", "Роли", "Настройки", "Аналитика"],
+};
 
-const ROLES: { key: string; title: string; hint: string }[] = [
-  { key: "user", title: "Участник", hint: "обычный доступ" },
-  { key: "moderator", title: "Модератор", hint: "модерация книг" },
-  { key: "admin", title: "Администратор", hint: "заявки, встречи, форум, аналитика" },
+const ROLES: { key: string; title: string; hint: string; can: string[] }[] = [
+  {
+    key: "user",
+    title: "Участник",
+    hint: "обычный доступ",
+    can: [
+      "ведёт дневник, отмечает «хочу встречу», голосует за время, записывается",
+      "может подать заявку и стать ведущим встречи",
+    ],
+  },
+  {
+    key: "moderator",
+    title: "Модератор",
+    hint: "разбирает предложенные книги",
+    can: ["всё, что участник", "добавляет в каталог книги, которые предложили участники"],
+  },
+  {
+    key: "admin",
+    title: "Администратор",
+    hint: "заявки, встречи, форум, аналитика",
+    can: [
+      "всё, что модератор",
+      "одобряет и отклоняет заявки ведущих",
+      "управляет встречами: окна за ведущего, перенос, отмена",
+      "ведёт форум переговорок и смотрит аналитику",
+      "видит настройки клуба, но не меняет",
+    ],
+  },
   {
     key: "superadmin",
     title: "Главный администратор",
     hint: "то же плюс настройки и раздача ролей",
+    can: ["всё, что администратор", "меняет настройки клуба", "раздаёт и снимает роли"],
   },
 ];
+
+const RANK: Record<string, number> = { user: 0, moderator: 1, admin: 2, superadmin: 3 };
 
 /** Панель оргкомитета. Одно место вместо россыпи экранов: всё, чем управляют
  * руками, лежит рядом, и не нужно помнить, где что. */
@@ -50,8 +83,8 @@ export function Admin({
   /** Открыта ли поверх карточка встречи: по её закрытии список обновляем. */
   eventOpen: boolean;
 }) {
-  const tabs = TABS;
-  const [tab, setTab] = useState<Tab>("Встречи");
+  const tabs = TABS_BY_ROLE[role] ?? [];
+  const [tab, setTab] = useState<Tab>(tabs[0] ?? "Книги");
 
   return (
     <div className="overlay">
@@ -62,17 +95,19 @@ export function Admin({
         <b>Оргкомитет</b>
       </div>
       <div className="screen">
-        <div className="row row--wrap" style={{ marginBottom: 12 }}>
-          {tabs.map((item) => (
-            <button
-              key={item}
-              className={`chip ${tab === item ? "chip--on" : ""}`}
-              onClick={() => setTab(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
+        {tabs.length > 1 && (
+          <div className="row row--wrap" style={{ marginBottom: 12 }}>
+            {tabs.map((item) => (
+              <button
+                key={item}
+                className={`chip ${tab === item ? "chip--on" : ""}`}
+                onClick={() => setTab(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        )}
 
         {tab === "Встречи" && <AdminEvents onOpenEvent={onOpenEvent} eventOpen={eventOpen} />}
         {tab === "Заявки" && <Applications onOpenEvent={onOpenEvent} />}
@@ -741,12 +776,20 @@ function Roles({ canEdit }: { canEdit: boolean }) {
 
   async function assign(userId: number, next: string) {
     const person = people.find((p) => p.id === userId);
+    const current = person?.role ?? "user";
+    const target = ROLES.find((r) => r.key === next);
     if (
       next === "superadmin" &&
       !confirm(
         `Выдать «${person?.name}» права главного администратора? ` +
           "Он сможет менять настройки клуба и раздавать роли, в том числе снимать их с других.",
       )
+    ) {
+      return;
+    }
+    if (
+      RANK[next] < RANK[current] &&
+      !confirm(`Понизить «${person?.name}» до роли «${target?.title}»?`)
     ) {
       return;
     }
@@ -767,14 +810,30 @@ function Roles({ canEdit }: { canEdit: boolean }) {
 
   return (
     <>
+      <Section title="Кто что может" storageKey="admin-roles-help" defaultOpen>
+        <div className="card">
+          {ROLES.map((r) => (
+            <div key={r.key} style={{ marginBottom: 10 }}>
+              <b>{r.title}</b>
+              <ul className="meta" style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                {r.can.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="hint" style={{ margin: 0 }}>
+            Ведущий — не роль: им становится любой участник, чью заявку одобрили. Свою
+            встречу он ведёт сам — расставляет окна, закрепляет время, отмечает пришедших.
+          </p>
+        </div>
+      </Section>
+
       {!canEdit && (
         <p className="hint">
           Раздавать роли может только главный администратор. Список ниже — для справки.
         </p>
       )}
-      <p className="hint">
-        {ROLES.map((r) => `${r.title} — ${r.hint}`).join("; ")}.
-      </p>
 
       <div className="search">
         <input
@@ -801,6 +860,7 @@ function Roles({ canEdit }: { canEdit: boolean }) {
               {ROLES.map((r) => (
                 <button
                   key={r.key}
+                  title={r.hint}
                   className={`chip ${person.role === r.key ? "chip--on" : ""}`}
                   disabled={person.role === r.key}
                   onClick={() => assign(person.id, r.key)}
