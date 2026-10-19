@@ -55,8 +55,12 @@ async def _ensure_schema() -> None:
 
     engine = create_async_engine(_url(TEST_DB))
     async with engine.begin() as conn:
+        # Сносим схему целиком, а не drop_all по моделям: удалённая модель
+        # оставляет свою таблицу в базе, и её внешние связи потом не дают
+        # удалить соседние. Так тестовая база не зависит от истории правок.
+        await conn.execute(sa.text("DROP SCHEMA public CASCADE"))
+        await conn.execute(sa.text("CREATE SCHEMA public"))
         await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     await engine.dispose()
     _schema_ready = True
