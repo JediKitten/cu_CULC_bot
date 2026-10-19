@@ -257,7 +257,11 @@ export function Profile({
           </span>
           <span>
             <b>Оргкомитет</b>
-            <div className="meta">Заявки, книги, переговорки, роли, аналитика</div>
+            <div className="meta">
+              {user.role === "moderator"
+                ? "Книги, которые предложили участники"
+                : "Встречи, заявки, форум, роли, аналитика"}
+            </div>
           </span>
         </button>
       )}
@@ -270,17 +274,19 @@ export function Profile({
               <div className="spread">
                 <b>{item.book.title}</b>
                 <span className="badge">
-                  {item.status === "submitted" ? "на рассмотрении" : "обсуждаем в чате"}
+                  {item.status === "submitted" ? "на рассмотрении" : "обсуждаем в форуме"}
                 </span>
               </div>
               <div className="meta">{item.event_type_title ?? item.proposed_type_title}</div>
-              {item.invite_link && (
+              {(item.invite_link || item.topic_link) && (
                 <a
                   className="chip"
-                  href={item.invite_link}
+                  href={item.invite_link ?? item.topic_link!}
                   style={{ marginTop: 8, display: "inline-block" }}
                 >
-                  Войти в чат с оргкомитетом
+                  {item.invite_link
+                    ? "Войти в форум оргкомитета"
+                    : "Открыть тему в форуме оргкомитета"}
                 </a>
               )}
               <button

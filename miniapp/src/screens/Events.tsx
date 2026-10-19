@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
 import { daysLeft, dateTimeLabel } from "../dates";
-import { audienceLabel } from "../labels";
+import { audienceLabel, eventStatus, toneClass } from "../labels";
 import { plural } from "../plural";
 import type { Board, ClubEvent, DemandCard } from "../types";
 
-/** Вкладка «Афиша» — один список из двух ярусов.
+/** Вкладка «Афиша» — одна история встречи, разложенная по стадиям.
  *
- * Наверху встречи: сначала те, где идёт голосование за время (по ним ждут
- * действия, и они подсвечены), затем назначенные. Под ними — спрос: книги,
- * которых ждут, но ведущего ещё нет. Это одна и та же история на разных
- * стадиях, поэтому и экран один.
+ * Сверху то, что уже назначено, ниже — где выбирают время (по ним ждут
+ * действия, они подсвечены), потом одобренные встречи, где ведущий ещё
+ * подбирает окна, и в самом низу спрос: книги, которых ждут, с теми, кто
+ * вызвался вести. Раньше всё до голосования сливалось в «ещё не назначено»,
+ * и было непонятно, что из этого скоро будет, а что просто хотят.
  */
 const PAST_FILTERS: { value: boolean | undefined; label: string }[] = [
   { value: undefined, label: "Все" },
@@ -45,23 +46,68 @@ export function Events({
   if (error) return <p className="screen error">{error}</p>;
   if (!board) return <p className="screen hint">Загружаем…</p>;
 
+  const scheduled = board.events.filter((event) => event.status === "scheduled");
+  const voting = board.events.filter((event) => event.status === "voting");
+  const preparing = board.preparing ?? [];
+  const nothing =
+    board.events.length === 0 && preparing.length === 0 && board.demands.length === 0;
+
+  // Пустые разделы не показываем вовсе: заголовок с пояснением, под которым
+  // ничего нет, только занимает экран и выглядит поломкой.
   return (
     <div className="screen">
-      <h2 style={{ marginTop: 0 }}>Встречи</h2>
-      {board.events.length === 0 && (
-        <p className="hint">
-          Пока ничего не назначено. Загляните в спрос ниже — может, вы и проведёте.
+      {nothing && (
+        <p className="hint" style={{ marginTop: 0 }}>
+          Пока ничего не назначено и не готовится. Откройте книгу в каталоге и нажмите
+          «Хочу встречу» — или вызовитесь провести её сами.
         </p>
       )}
-      {board.events.map((event) => (
-        <EventCard key={event.id} event={event} onOpen={() => onOpenEvent(event.id)} />
-      ))}
 
-      {/* Пустой раздел не показываем вовсе: заголовок с пояснением, под которым
-          ничего нет, только занимает экран и выглядит поломкой. */}
+      {scheduled.length > 0 && (
+        <>
+          <h2 style={{ marginTop: 0 }}>Скоро</h2>
+          {scheduled.map((event) => (
+            <EventCard key={event.id} event={event} onOpen={() => onOpenEvent(event.id)} />
+          ))}
+        </>
+      )}
+
+      {voting.length > 0 && (
+        <>
+          <h2 style={scheduled.length === 0 ? { marginTop: 0 } : undefined}>Выбираем время</h2>
+          <p className="hint">Отметьте удобные окна — встреча встанет на самое популярное.</p>
+          {voting.map((event) => (
+            <EventCard key={event.id} event={event} onOpen={() => onOpenEvent(event.id)} />
+          ))}
+        </>
+      )}
+
+      {preparing.length > 0 && (
+        <>
+          <h2 style={board.events.length === 0 ? { marginTop: 0 } : undefined}>Готовятся</h2>
+          <p className="hint">
+            Ведущий одобрен и подбирает время. Как только предложит окна, откроется
+            голосование.
+          </p>
+          {preparing.map((event) => (
+            <EventCard key={event.id} event={event} onOpen={() => onOpenEvent(event.id)} />
+          ))}
+        </>
+      )}
+
       {board.demands.length > 0 && (
         <>
-          <h2>Мероприятие ещё не назначено</h2>
+          <h2
+            style={
+              board.events.length === 0 && preparing.length === 0 ? { marginTop: 0 } : undefined
+            }
+          >
+            Ждут ведущего
+          </h2>
+          <p className="hint">
+            Книги, по которым хотят встречу. Отметьтесь «хочу» — когда наберётся достаточно
+            людей, оргкомитет позовёт ведущего. Или вызовитесь провести сами.
+          </p>
           {board.demands.map((demand) => (
             <DemandRow
               key={demand.book.id}
@@ -111,7 +157,9 @@ export function Events({
 
 function EventCard({ event, onOpen }: { event: ClubEvent; onOpen(): void }) {
   const voting = event.status === "voting";
-  const mine = event.status === "slot_selection" && event.my_event;
+  const preparing = event.status === "slot_selection";
+  const mine = preparing && event.my_event;
+  const status = eventStatus(event.status);
 
   return (
     <button
@@ -121,20 +169,12 @@ function EventCard({ event, onOpen }: { event: ClubEvent; onOpen(): void }) {
     >
       <div className="spread">
         <b>{event.book.title}</b>
-        <span className={`badge ${voting || mine ? "badge--live" : ""}`}>
-          {mine
-            ? "нужны окна"
-            : voting
-              ? "выбираем время"
-              : event.status === "scheduled"
-                ? "назначена"
-                : event.status === "cancelled"
-                  ? "отменена"
-                  : "прошла"}
+        <span className={mine ? "badge badge--live" : toneClass(status.tone)}>
+          {mine ? "нужны окна" : preparing ? "готовится" : status.label}
         </span>
       </div>
       <div className="meta">
-        {event.event_type_title} · ведёт {event.organizer_name}
+        {event.event_type_title} · ведёт {event.my_event ? "вы" : event.organizer_name}
       </div>
 
       {event.starts_at && (
@@ -151,6 +191,11 @@ function EventCard({ event, onOpen }: { event: ClubEvent; onOpen(): void }) {
         </div>
       )}
       {mine && <div style={{ marginTop: 6 }}>Заявку одобрили — предложите удобные окна.</div>}
+      {preparing && !mine && (
+        <div className="meta" style={{ marginTop: 6 }}>
+          Ведущий подбирает время
+        </div>
+      )}
       {event.status === "scheduled" && (
         <div className="meta" style={{ marginTop: 6 }}>
           Идут: {event.going}
@@ -175,6 +220,7 @@ function EventCard({ event, onOpen }: { event: ClubEvent; onOpen(): void }) {
 }
 
 function DemandRow({ demand, onOpen }: { demand: DemandCard; onOpen(): void }) {
+  const hosts = demand.hosts ?? [];
   return (
     <button
       className="card"
@@ -184,21 +230,30 @@ function DemandRow({ demand, onOpen }: { demand: DemandCard; onOpen(): void }) {
       <div className="spread">
         <b>{demand.book.title}</b>
         <span className="badge badge--waiting">
-          {demand.waiting} {plural(demand.waiting, ["человек", "человека", "человек"])}
+          {demand.waiting} {plural(demand.waiting, ["хочет", "хотят", "хотят"])}
         </span>
       </div>
       <div className="meta">{demand.book.authors.join(", ")}</div>
-      <div className="row row--wrap" style={{ marginTop: 8 }}>
-        {demand.types.map((type) => (
-          <span key={type.event_type_id} className="badge">
-            {type.title} · {type.count}
-          </span>
-        ))}
-      </div>
+      {demand.types.length > 0 && (
+        <div className="row row--wrap" style={{ marginTop: 8 }}>
+          {demand.types.map((type) => (
+            <span key={type.event_type_id} className="badge">
+              {type.title} · {type.count}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="meta" style={{ marginTop: 6 }}>
-        {demand.joined ? "Вы в списке ожидающих" : "Нажмите, чтобы присоединиться"}
-        {demand.readers > 0 && ` · читали ${demand.readers}`}
-        {demand.has_application && " · есть заявка от ведущего"}
+        {hosts.length > 0
+          ? `🙋 Хочет провести: ${hosts.map((host) => host.name).join(", ")} · на рассмотрении`
+          : "Ведущего пока нет"}
+      </div>
+      <div style={{ marginTop: 6 }}>
+        {demand.joined ? (
+          <span className="badge badge--ok">✓ Вы в списке</span>
+        ) : (
+          <span className="meta">Нажмите, чтобы присоединиться</span>
+        )}
       </div>
     </button>
   );

@@ -441,3 +441,94 @@ async def mark_attendance(
             )
         )
         await session.commit()
+
+
+# Пока встреча в одном из этих статусов, её ещё можно отменить.
+CANCELLABLE = (EventStatus.SLOT_SELECTION, EventStatus.VOTING, EventStatus.SCHEDULED)
+
+
+async def cancel(session: AsyncSession, event: Event, *, reason: str, by: User) -> Event:
+    """Отменяет встречу.
+
+    Предупреждаем всех, кого она касалась: ведущего, записавшихся и тех, кто
+    голосовал за время. Спрос, который закрыло назначение, возвращаем — люди
+    по-прежнему хотят встречу по этой книге, она просто не случилась.
+    Тема в форуме удаляется: обсуждать там больше нечего.
+    """
+    from app.models import OrganizerApplication
+    from app.services import audit, rooms
+
+    if event.status not in CANCELLABLE:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Эту встречу уже не отменить")
+
+    event.status = EventStatus.CANCELLED
+    event.cancel_reason = reason
+
+    going = sa.select(Participation.user_id).where(Participation.event_id == event.id)
+    voted = sa.select(SlotVote.user_id).where(SlotVote.event_id == event.id)
+    recipients = list(
+        (
+            await session.execute(
+                sa.select(User.id).where(
+                    User.is_active, sa.or_(User.id.in_(going), User.id.in_(voted))
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if event.organizer_user_id is not None:
+        recipients.append(event.organizer_user_id)
+
+    book = await session.get(Book, event.book_id)
+    slot = await session.get(EventSlot, event.slot_id) if event.slot_id else None
+    await notify.queue_many(
+        session,
+        recipients,
+        NotificationKind.EVENT_CANCELLED,
+        dedup_prefix=f"cancelled:{event.id}",
+        payload={
+            "event_id": event.id,
+            "book_title": book.title if book else "",
+            "book_authors": ", ".join((book.authors or [])[:2]) if book else "",
+            "when": slot.starts_at.strftime("%d.%m %H:%M") if slot else "",
+            "reason": reason,
+        },
+    )
+
+    if event.decided_at is not None:
+        # Граница — рождение встречи, а не момент закрепления: revoked_at
+        # ставит база временем начала транзакции, и оно бывает чуть раньше
+        # decided_at. Других встреч по книге в это время быть не могло.
+        # Живой спрос у человека по книге один (частичный уникальный индекс):
+        # кто уже успел отметиться заново, тому старую запись не воскрешаем.
+        active = sa.select(Demand.user_id).where(
+            Demand.book_id == event.book_id, Demand.revoked_at.is_(None)
+        )
+        await session.execute(
+            sa.update(Demand)
+            .where(
+                Demand.book_id == event.book_id,
+                Demand.revoke_reason == RevokeReason.SCHEDULED,
+                Demand.revoked_at >= event.created_at,
+                Demand.user_id.not_in(active),
+            )
+            .values(revoked_at=None, revoke_reason=None)
+        )
+
+    audit.log(
+        session,
+        actor_id=by.id,
+        entity="event",
+        entity_id=event.id,
+        action="cancel",
+        comment=reason,
+    )
+    await session.commit()
+
+    if event.application_id is not None:
+        application = await session.get(OrganizerApplication, event.application_id)
+        if application is not None:
+            await rooms.close_topic(session, application)
+    await session.refresh(event)
+    return event

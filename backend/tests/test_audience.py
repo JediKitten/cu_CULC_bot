@@ -1,6 +1,6 @@
 """Фильтр аудитории: встреча «только для студентов» не должна протекать наружу."""
 
-from tests.conftest import SUPERADMIN_TG_ID, auth, guest, member
+from tests.conftest import SUPERADMIN_TG_ID, auth, guest, in_days, member
 from tests.test_flow import make_book, type_ids
 
 
@@ -27,7 +27,7 @@ async def approved_event(client, session, *, audience: list[str]) -> int:
 
     await client.post(
         f"/api/events/{event_id}/slots",
-        json={"slots": [{"starts_at": "2026-11-05T18:00:00+03:00"}]},
+        json={"slots": [{"starts_at": in_days(15)}]},
         headers=auth(organizer),
     )
     return event_id

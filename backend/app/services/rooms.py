@@ -1,14 +1,23 @@
-"""Пул «переговорок» — чатов, в которых оргкомитет обсуждает заявки.
+"""Переговорки — темы в форуме оргкомитета.
 
-Бот не умеет создавать чаты: в Bot API нет такого метода, и добавлять людей
-в чат он тоже не может. Поэтому оргкомитет один раз руками заводит несколько
-пустых супергрупп и делает бота администратором, а бот раздаёт их заявкам:
-переименовывает, зовёт кандидата одноразовой ссылкой, по завершении выселяет
-его и вычищает переписку.
+Бот не умеет создавать чаты (в Bot API нет такого метода), зато умеет
+создавать темы в форуме. Поэтому оргкомитет один раз руками заводит супергруппу
+с включёнными темами и делает бота администратором, а дальше бот под каждую
+заявку открывает свою тему: зовёт кандидата одноразовой ссылкой, держит тему,
+пока жива встреча, и удаляет её вместе с перепиской, когда встреча прошла,
+отменилась или заявку отклонили.
+
+Раньше вместо форума был пул отдельных супергрупп, и комнату отбирали сразу
+при одобрении — ведущему негде было договариваться о встрече, а оргкомитету
+приходилось держать по чату на заявку.
+
+В форуме каждый участник видит все темы: скрыть одну Telegram не даёт. Так
+задумано — там оргкомитет и ведущие. Кандидата бот исключает, когда у того не
+остаётся живых тем.
 
 Ни одна ошибка Telegram не должна ронять решение по заявке: одобрение — это
-запись в базе, а чат вокруг неё — удобство. Поэтому всё, что уходит в сеть,
-обёрнуто и записывается в check_error комнаты.
+запись в базе, а тема вокруг неё — удобство. Поэтому всё, что уходит в сеть,
+обёрнуто и записывается в check_error форума.
 """
 
 import logging
@@ -18,19 +27,42 @@ import sqlalchemy as sa
 from aiogram.exceptions import TelegramAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, MeetingRoom, OrganizerApplication, RoomMessage, User
-from app.models.enums import RoomStatus
+from app.models import Book, MeetingRoom, OrganizerApplication, User
+from app.models.enums import RoomStatus, UserRole
 from app.services.settings import SettingsService
 from app.services.tg import BotUnavailable, get_bot
 
 logger = logging.getLogger(__name__)
 
-# Права, без которых комната бесполезна: переименовать, позвать, вычистить.
-REQUIRED_RIGHTS = ("can_change_info", "can_invite_users", "can_delete_messages")
+# Права, без которых форум бесполезен: заводить темы, звать людей, удалять
+# темы с перепиской и исключать тех, у кого дел в форуме не осталось.
+REQUIRED_RIGHTS = (
+    "can_manage_topics",
+    "can_invite_users",
+    "can_delete_messages",
+    "can_restrict_members",
+)
+
+RIGHTS_HINT = (
+    "«управление темами», «приглашение пользователей», «удаление сообщений» "
+    "и «блокировка пользователей»"
+)
+
+# Статусы участника, при которых звать его в форум не нужно.
+INSIDE = ("creator", "administrator", "member", "restricted")
+
+
+def _problem(member, chat) -> str | None:
+    if not getattr(chat, "is_forum", False):
+        return "В группе не включены темы: Настройки группы → Темы"
+    if member.status != "administrator":
+        return "Бот не администратор в этой группе"
+    missing = [r for r in REQUIRED_RIGHTS if not getattr(member, r, False)]
+    return ("Не хватает прав: " + ", ".join(missing)) if missing else None
 
 
 async def check(session: AsyncSession, room: MeetingRoom) -> str | None:
-    """Проверяет, что бот в комнате админ с нужными правами.
+    """Проверяет, что группа — форум, а бот в ней админ с нужными правами.
 
     Возвращает текст проблемы или None. Проверка не бросает исключений
     намеренно: её вызывают и из фоновой задачи, где падать некому.
@@ -38,14 +70,11 @@ async def check(session: AsyncSession, room: MeetingRoom) -> str | None:
     try:
         bot = get_bot()
         member = await bot.get_chat_member(room.chat_id, (await bot.me()).id)
+        chat = await bot.get_chat(room.chat_id)
     except (BotUnavailable, TelegramAPIError) as exc:
         problem = str(exc)
     else:
-        if member.status != "administrator":
-            problem = "Бот не администратор в этом чате"
-        else:
-            missing = [r for r in REQUIRED_RIGHTS if not getattr(member, r, False)]
-            problem = ("Не хватает прав: " + ", ".join(missing)) if missing else None
+        problem = _problem(member, chat)
 
     room.check_error = problem
     room.checked_at = datetime.now(UTC)
@@ -69,59 +98,54 @@ def candidates(chat_id: int) -> list[int]:
     return [int(f"-100{chat_id}"), chat_id]
 
 
-async def resolve(chat_id: int) -> tuple[int, str] | None:
-    """Находит чат, где бот действительно администратор с нужными правами.
+class RoomNotReady(RuntimeError):
+    """Группа не найдена, не форум или бот в ней без нужных прав."""
 
-    Возвращает найденный идентификатор и название либо None.
+
+async def resolve(chat_id: int) -> tuple[int, str]:
+    """Находит группу, где бот может вести темы.
+
+    Возвращает идентификатор и название либо бросает RoomNotReady с тем, что
+    именно не так: «не нашёл» и «нашёл, но темы выключены» чинятся по-разному.
     """
     bot = get_bot()
     me = (await bot.me()).id
+    problem = None
     for candidate in candidates(chat_id):
         try:
             member = await bot.get_chat_member(candidate, me)
-            if member.status != "administrator":
-                continue
-            if any(not getattr(member, right, False) for right in REQUIRED_RIGHTS):
-                continue
             chat = await bot.get_chat(candidate)
-            return candidate, chat.title or f"Переговорка {candidate}"
         except TelegramAPIError:
             continue
-    return None
-
-
-class RoomNotReady(RuntimeError):
-    """Чат не найден или бот в нём не администратор — заводить нечего."""
+        problem = _problem(member, chat)
+        if problem is None:
+            return candidate, chat.title or f"Форум {candidate}"
+    raise RoomNotReady(
+        problem
+        or "Не нашёл такую группу. Проверьте, что бот добавлен в неё администратором. "
+        "Идентификатор супергруппы выглядит как -1001234567890."
+    )
 
 
 async def register(
     session: AsyncSession, chat_id: int, title: str | None, added_by: int
 ) -> MeetingRoom:
-    """Заводит комнату в пуле.
+    """Подключает форум.
 
-    Комната сохраняется только после того, как бот убедился, что чат
-    существует и он в нём администратор с правами на переименование,
-    приглашение и удаление сообщений. Раньше запись создавалась в любом
-    случае — и пул засорялся комнатами, которые никогда не заработают.
+    Форум сохраняется только после того, как бот убедился, что группа
+    существует, темы в ней включены и права у него есть: заведомо мёртвая
+    запись в базе ничем не лучше её отсутствия.
     """
     try:
-        found = await resolve(chat_id)
+        resolved_id, chat_title = await resolve(chat_id)
     except BotUnavailable as exc:
         raise RoomNotReady("Бот не настроен: нет токена") from exc
 
-    if found is None:
-        raise RoomNotReady(
-            "Не нашёл такой чат или бот в нём не администратор. Проверьте, что: "
-            "чат — супергруппа, бот добавлен в неё администратором, и у него есть права "
-            "«изменение профиля группы», «приглашение пользователей» и «удаление сообщений». "
-            "Идентификатор супергруппы выглядит как -1001234567890."
-        )
-
-    resolved_id, chat_title = found
     existing = (
         await session.execute(sa.select(MeetingRoom).where(MeetingRoom.chat_id == resolved_id))
     ).scalar_one_or_none()
     if existing is not None:
+        existing.status = RoomStatus.FREE
         await check(session, existing)
         return existing
 
@@ -138,53 +162,50 @@ async def register(
 
 
 async def forget(session: AsyncSession, room: MeetingRoom) -> None:
-    """Убирает комнату из пула.
+    """Отключает форум.
 
-    Сам чат живёт своей жизнью: бот из него не выходит и ничего в нём не
-    трогает — система просто перестаёт им распоряжаться. Занятую комнату
-    сначала освобождаем, иначе заявка осталась бы со ссылкой в никуда.
+    Сама группа и темы в ней остаются: бот из неё не выходит и ничего не
+    удаляет — система просто перестаёт ею распоряжаться. Заявки отвязываем,
+    чтобы они не ссылались на тему, которой бот больше не управляет.
     """
-    if room.status is RoomStatus.BUSY:
-        await release(session, room, kick_user_tg_id=None)
-    await session.execute(sa.delete(RoomMessage).where(RoomMessage.room_id == room.id))
     await session.execute(
         sa.update(OrganizerApplication)
         .where(OrganizerApplication.room_id == room.id)
-        .values(room_id=None, invite_link=None)
+        .values(room_id=None, topic_id=None, invite_link=None)
     )
     await session.delete(room)
     await session.commit()
 
 
-async def free_room(session: AsyncSession) -> MeetingRoom | None:
-    """Свободная комната без известных проблем с правами.
+async def active_forum(session: AsyncSession) -> MeetingRoom | None:
+    """Форум, в котором сейчас открываем темы.
 
-    Порядок по id, а не случайный: с одним и тем же чатом оргкомитету проще —
-    он привыкает, где обычно идут разговоры.
+    Обычно он один. Если подключили новый, а старый не отключили, берём самый
+    свежий: его только что проверили.
     """
     return (
         await session.execute(
             sa.select(MeetingRoom)
-            .where(MeetingRoom.status == RoomStatus.FREE, MeetingRoom.check_error.is_(None))
-            .order_by(MeetingRoom.id)
+            .where(MeetingRoom.status != RoomStatus.DISABLED, MeetingRoom.check_error.is_(None))
+            .order_by(MeetingRoom.id.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
 
 
-async def remember(session: AsyncSession, chat_id: int, message_id: int) -> None:
-    """Запоминает сообщение переговорки, чтобы потом её вычистить."""
-    room = (
-        await session.execute(sa.select(MeetingRoom).where(MeetingRoom.chat_id == chat_id))
-    ).scalar_one_or_none()
-    if room is None:
-        return
-    await session.execute(
-        sa.dialects.postgresql.insert(RoomMessage)
-        .values(room_id=room.id, message_id=message_id)
-        .on_conflict_do_nothing(index_elements=["room_id", "message_id"])
-    )
-    await session.commit()
+def topic_link(chat_id: int, topic_id: int | None) -> str | None:
+    """Ссылка на тему. Работает для тех, кто уже в группе: t.me/c/… —
+    внутренний адрес, по нему не вступают."""
+    if topic_id is None:
+        return None
+    internal = str(chat_id).removeprefix("-100").removeprefix("-")
+    return f"https://t.me/c/{internal}/{topic_id}"
+
+
+def topic_name(book: Book | None, user: User | None) -> str:
+    title = (book.title if book else "Заявка")[:80]
+    who = user.display_name if user else ""
+    return f"{title} — {who}"[:128] if who else title
 
 
 def _card(application: OrganizerApplication, book: Book | None, user: User | None) -> str:
@@ -206,48 +227,63 @@ def _card(application: OrganizerApplication, book: Book | None, user: User | Non
             if isinstance(answer, list):
                 answer = ", ".join(str(a) for a in answer)
             lines.append(f"• {question}: {answer}")
-    lines += ["", "Решение принимается в приложении — здесь только обсуждение."]
+    lines += [
+        "",
+        "Решение принимается в приложении — здесь только обсуждение. "
+        "Тема живёт, пока жива встреча, потом удаляется вместе с перепиской.",
+    ]
     return "\n".join(lines)
 
 
-async def open_chat(session: AsyncSession, application: OrganizerApplication) -> MeetingRoom | None:
-    """Занимает комнату под заявку и зовёт туда кандидата.
+async def _inside(bot, chat_id: int, tg_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, tg_id)
+    except TelegramAPIError:
+        return False
+    return member.status in INSIDE
 
-    Возвращает комнату либо None, если свободных нет — тогда вызывающий
+
+async def open_topic(
+    session: AsyncSession, application: OrganizerApplication
+) -> MeetingRoom | None:
+    """Заводит тему под заявку и зовёт туда кандидата.
+
+    Возвращает форум либо None, если рабочего форума нет — тогда вызывающий
     сообщает об этом оргкомитету, а заявка остаётся ждать.
     """
-    room = await free_room(session)
+    room = await active_forum(session)
     if room is None:
         return None
 
     book = await session.get(Book, application.book_id)
     user = await session.get(User, application.user_id)
-    settings = SettingsService(session)
-    ttl = await settings.get("invite_link_ttl_hours")
+    ttl = await SettingsService(session).get("invite_link_ttl_hours")
 
-    room.status = RoomStatus.BUSY
-    room.current_application_id = application.id
     application.room_id = room.id
     application.chat_opened_at = datetime.now(UTC)
     await session.flush()
 
     try:
         bot = get_bot()
-        title = f"{(book.title if book else 'Заявка')[:60]} — {user.display_name if user else ''}"
-        await bot.set_chat_title(room.chat_id, title[:128])
-        message = await bot.send_message(room.chat_id, _card(application, book, user))
-        session.add(RoomMessage(room_id=room.id, message_id=message.message_id))
-        link = await bot.create_chat_invite_link(
-            room.chat_id,
-            name=f"Заявка {application.id}",
-            member_limit=1,
-            expire_date=datetime.now(UTC) + timedelta(hours=ttl),
+        topic = await bot.create_forum_topic(room.chat_id, topic_name(book, user))
+        application.topic_id = topic.message_thread_id
+        await bot.send_message(
+            room.chat_id, _card(application, book, user), message_thread_id=topic.message_thread_id
         )
-        application.invite_link = link.invite_link
+        # Кто уже в форуме (ведёт другую встречу или сам из оргкомитета),
+        # тому ссылка не нужна — хватит ссылки на тему.
+        if user is None or not await _inside(bot, room.chat_id, user.tg_id):
+            link = await bot.create_chat_invite_link(
+                room.chat_id,
+                name=f"Заявка {application.id}",
+                member_limit=1,
+                expire_date=datetime.now(UTC) + timedelta(hours=ttl),
+            )
+            application.invite_link = link.invite_link
     except (BotUnavailable, TelegramAPIError) as exc:
-        # Комнату не отпускаем: заявка уже привязана к ней, а починить права
-        # и повторить открытие оргкомитет сможет из админки.
-        logger.warning("Не удалось открыть переговорку %s: %s", room.chat_id, exc)
+        # Заявку к форуму не привязываем намертво: пока темы нет, оргкомитет
+        # может починить права и открыть её ещё раз.
+        logger.warning("Не удалось открыть тему в %s: %s", room.chat_id, exc)
         room.check_error = str(exc)
 
     await session.commit()
@@ -255,46 +291,66 @@ async def open_chat(session: AsyncSession, application: OrganizerApplication) ->
     return room
 
 
-async def release(session: AsyncSession, room: MeetingRoom, *, kick_user_tg_id: int | None) -> None:
-    """Освобождает комнату: выселяет гостя, отзывает ссылки, чистит переписку.
-
-    Полной гарантии чистоты нет: сообщения, о которых бот не знает, останутся.
-    Поэтому в переговорке не обсуждают ничего, чего не должен увидеть
-    следующий кандидат, — об этом сказано и в карточке заявки.
-    """
-    settings = SettingsService(session)
-    batch = await settings.get("room_cleanup_batch")
-
-    message_ids = list(
-        (
-            await session.execute(
-                sa.select(RoomMessage.message_id).where(RoomMessage.room_id == room.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
+async def post(session: AsyncSession, application: OrganizerApplication, text: str) -> None:
+    """Пишет в тему заявки. Нет темы — молча ничего: это подсказка, не дело."""
+    if application.topic_id is None or application.room_id is None:
+        return
+    room = await session.get(MeetingRoom, application.room_id)
+    if room is None:
+        return
     try:
-        bot = get_bot()
-        if kick_user_tg_id is not None:
-            # Забанить и сразу разбанить — единственный способ выселить: без
-            # второго шага человек останется в бане и не сможет вернуться,
-            # даже если позже подаст новую заявку.
-            await bot.ban_chat_member(room.chat_id, kick_user_tg_id)
-            await bot.unban_chat_member(room.chat_id, kick_user_tg_id, only_if_banned=True)
-        for start in range(0, len(message_ids), batch):
-            chunk = message_ids[start : start + batch]
-            try:
-                await bot.delete_messages(room.chat_id, chunk)
-            except TelegramAPIError as exc:
-                logger.info("Часть сообщений не удалилась в %s: %s", room.chat_id, exc)
-        await bot.set_chat_title(room.chat_id, room.title[:128])
+        await get_bot().send_message(room.chat_id, text, message_thread_id=application.topic_id)
     except (BotUnavailable, TelegramAPIError) as exc:
-        logger.warning("Не удалось прибрать переговорку %s: %s", room.chat_id, exc)
-        room.check_error = str(exc)
+        logger.info("Не удалось написать в тему %s: %s", application.topic_id, exc)
 
-    await session.execute(sa.delete(RoomMessage).where(RoomMessage.room_id == room.id))
-    room.status = RoomStatus.FREE
-    room.current_application_id = None
+
+async def close_topic(session: AsyncSession, application: OrganizerApplication) -> None:
+    """Удаляет тему заявки вместе с перепиской и, если кандидату в форуме
+    больше нечего делать, исключает его.
+
+    Идемпотентна: вызывается и из решений по заявке, и из фоновой задачи.
+    Если тему уже удалили руками, Telegram ответит ошибкой — это не повод
+    оставлять заявку привязанной к пустому месту.
+    """
+    if application.topic_id is None or application.room_id is None:
+        return
+    room = await session.get(MeetingRoom, application.room_id)
+    topic_id = application.topic_id
+    application.topic_id = None
+    application.invite_link = None
+    await session.flush()
+
+    if room is not None:
+        candidate = await session.get(User, application.user_id)
+        still_busy = (
+            await session.execute(
+                sa.select(sa.func.count()).where(
+                    OrganizerApplication.user_id == application.user_id,
+                    OrganizerApplication.room_id == room.id,
+                    OrganizerApplication.topic_id.is_not(None),
+                )
+            )
+        ).scalar_one()
+        try:
+            bot = get_bot()
+            try:
+                await bot.delete_forum_topic(room.chat_id, topic_id)
+            except TelegramAPIError as exc:
+                logger.info("Тема %s в %s не удалилась: %s", topic_id, room.chat_id, exc)
+            # Оргкомитет из форума не выселяем: он там работает.
+            if (
+                candidate is not None
+                and not still_busy
+                and candidate.role.rank < UserRole.ADMIN.rank
+            ):
+                # Забанить и сразу разбанить — единственный способ выселить: без
+                # второго шага человек останется в бане и не сможет вернуться,
+                # даже если позже подаст новую заявку.
+                await bot.ban_chat_member(room.chat_id, candidate.tg_id)
+                await bot.unban_chat_member(room.chat_id, candidate.tg_id, only_if_banned=True)
+        except (BotUnavailable, TelegramAPIError) as exc:
+            # В check_error не пишем: неудачное выселение одного человека
+            # (например, владельца группы) не повод останавливать весь форум.
+            logger.warning("Не удалось прибрать тему %s в %s: %s", topic_id, room.chat_id, exc)
+
     await session.commit()

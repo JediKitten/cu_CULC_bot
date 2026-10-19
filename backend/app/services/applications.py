@@ -1,8 +1,8 @@
 """Заявки на организацию встречи.
 
 Путь заявки: подана → открыта переговорка → одобрена или отклонена. Одобрение
-рождает мероприятие и задаёт его аудиторию; отказ и отзыв заявки освобождают
-комнату.
+рождает мероприятие и задаёт его аудиторию. Переговорка — тема в форуме
+оргкомитета — живёт до конца встречи; отказ и отзыв заявки удаляют её сразу.
 """
 
 from datetime import UTC, datetime
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, Event, EventType, MeetingRoom, OrganizerApplication, User
+from app.models import Book, Event, EventType, OrganizerApplication, User
 from app.models.enums import (
     ApplicationStatus,
     EventStatus,
@@ -57,6 +57,9 @@ SURVEY: tuple[dict, ...] = (
     },
     {"key": "idea", "title": "О чём будет встреча?", "type": "text", "required": True},
 )
+
+# Пока встреча в одном из этих статусов, её тема в форуме нужна.
+ACTIVE_EVENT_STATUSES = (EventStatus.SLOT_SELECTION, EventStatus.VOTING, EventStatus.SCHEDULED)
 
 REQUIRED_KEYS = tuple(q["key"] for q in SURVEY if q.get("required"))
 
@@ -162,26 +165,48 @@ async def submit(
     await session.refresh(application)
 
     if await SettingsService(session).get("auto_open_room"):
-        await open_room(session, application, actor_id=None)
+        # Заявка уже сохранена. Если форум недоступен, оргкомитет получил
+        # уведомление, а кандидату незачем видеть ошибку вместо «заявка подана».
+        try:
+            await open_room(session, application, actor_id=None)
+        except HTTPException:
+            await session.refresh(application)
     return application
 
 
 async def open_room(
     session: AsyncSession, application: OrganizerApplication, *, actor_id: int | None
 ) -> OrganizerApplication:
-    """Занимает переговорку под заявку и зовёт туда кандидата."""
-    if application.status is not ApplicationStatus.SUBMITTED:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Чат по этой заявке уже открывали")
+    """Заводит тему в форуме под заявку и зовёт туда кандидата.
+
+    Открыть можно и одобренную заявку, пока её встреча жива: форум могли
+    подключить позже, а тему — удалить руками.
+    """
+    if application.topic_id is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Тема по этой заявке уже открыта")
+    if application.status is ApplicationStatus.APPROVED:
+        alive = (
+            await session.execute(
+                sa.select(Event.id).where(
+                    Event.application_id == application.id,
+                    Event.status.in_(ACTIVE_EVENT_STATUSES),
+                )
+            )
+        ).scalar_one_or_none()
+        if alive is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Встреча по этой заявке уже закончилась")
+    elif application.status not in (ApplicationStatus.SUBMITTED, ApplicationStatus.CHAT_OPEN):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Заявка уже закрыта")
 
     book = await session.get(Book, application.book_id)
-    room = await rooms.open_chat(session, application)
+    room = await rooms.open_topic(session, application)
     payload = {
         "application_id": application.id,
         "book_title": book.title if book else "",
         "book_authors": ", ".join((book.authors or [])[:2]) if book else "",
     }
 
-    if room is None:
+    if room is None or application.topic_id is None:
         await notify.queue_many(
             session,
             await admins(session),
@@ -192,16 +217,22 @@ async def open_room(
         await session.commit()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Свободных переговорок нет. Освободите комнату или добавьте новую.",
+            "Форум переговорок не подключён или у бота не хватает прав — "
+            "проверьте его во вкладке «Форум».",
         )
 
-    application.status = ApplicationStatus.CHAT_OPEN
+    if application.status is ApplicationStatus.SUBMITTED:
+        application.status = ApplicationStatus.CHAT_OPEN
     await notify.queue(
         session,
         application.user_id,
         NotificationKind.APPLICATION_CHAT_OPEN,
-        f"chatopen:{application.id}",
-        payload | {"invite_link": application.invite_link},
+        f"chatopen:{application.id}:{application.topic_id}",
+        payload
+        | {
+            "invite_link": application.invite_link,
+            "topic_link": rooms.topic_link(room.chat_id, application.topic_id),
+        },
     )
     audit.log(
         session,
@@ -209,21 +240,15 @@ async def open_room(
         entity="application",
         entity_id=application.id,
         action="open_room",
-        payload={"room_id": room.id},
+        payload={"room_id": room.id, "topic_id": application.topic_id},
     )
     await session.commit()
     await session.refresh(application)
     return application
 
 
-async def _release_room(session: AsyncSession, application: OrganizerApplication) -> None:
-    if application.room_id is None:
-        return
-    room = await session.get(MeetingRoom, application.room_id)
-    if room is None:
-        return
-    candidate = await session.get(User, application.user_id)
-    await rooms.release(session, room, kick_user_tg_id=candidate.tg_id if candidate else None)
+async def close_room(session: AsyncSession, application: OrganizerApplication) -> None:
+    await rooms.close_topic(session, application)
 
 
 async def approve(
@@ -297,7 +322,13 @@ async def approve(
     )
     await session.commit()
 
-    await _release_room(session, application)
+    # Тему не трогаем: в ней ведущий с оргкомитетом и договариваются о встрече.
+    await rooms.post(
+        session,
+        application,
+        "✅ Заявка одобрена. Дальше договариваемся здесь: тема останется, "
+        "пока встреча не пройдёт или не отменится.",
+    )
     await session.refresh(event)
     return event
 
@@ -335,7 +366,7 @@ async def reject(
         comment=comment,
     )
     await session.commit()
-    await _release_room(session, application)
+    await close_room(session, application)
     await session.refresh(application)
     return application
 
@@ -345,4 +376,4 @@ async def withdraw(session: AsyncSession, application: OrganizerApplication) -> 
         raise HTTPException(status.HTTP_409_CONFLICT, "Заявка уже закрыта")
     application.status = ApplicationStatus.WITHDRAWN
     await session.commit()
-    await _release_room(session, application)
+    await close_room(session, application)

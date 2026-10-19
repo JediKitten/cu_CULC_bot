@@ -13,6 +13,7 @@ from app.models.enums import ApplicationStatus, EventStatus, ReadingStatus
 from app.models.event import Event
 from app.models.organizing import OrganizerApplication
 from app.schemas import BookBrief, BookCard, DemandTypeCount
+from app.services import people
 from app.services.books.normalize import BookCandidate
 
 
@@ -196,7 +197,7 @@ async def card(session: AsyncSession, user_id: int, book: Book) -> BookCard:
 
     open_event = (
         await session.execute(
-            sa.select(Event.id)
+            sa.select(Event.id, Event.status, Event.organizer_user_id)
             .where(
                 Event.book_id == book.id,
                 Event.status.in_(
@@ -206,7 +207,7 @@ async def card(session: AsyncSession, user_id: int, book: Book) -> BookCard:
             .order_by(Event.id.desc())
             .limit(1)
         )
-    ).scalar_one_or_none()
+    ).one_or_none()
 
     my_application = (
         await session.execute(
@@ -258,6 +259,10 @@ async def card(session: AsyncSession, user_id: int, book: Book) -> BookCard:
         my_finished_on=entry.finished_on if entry else None,
         demanded=bool(await my_demands(session, user_id, [book.id])),
         demand_count=waiting,
-        open_event_id=open_event,
+        open_event_id=open_event.id if open_event else None,
+        open_event_status=open_event.status if open_event else None,
+        open_event_organizer=(
+            await people.name_of(session, open_event.organizer_user_id) if open_event else None
+        ),
         my_application_status=my_application,
     )

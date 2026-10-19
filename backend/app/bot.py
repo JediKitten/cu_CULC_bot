@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 
 import sqlalchemy as sa
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
@@ -32,7 +32,7 @@ from app.db import SessionLocal
 from app.models import Event, Notification, User
 from app.models.enums import AttendanceMethod, EventStatus
 from app.services import events as events_service
-from app.services import jobs, notify, rooms
+from app.services import jobs, notify
 
 logger = logging.getLogger(__name__)
 
@@ -130,16 +130,6 @@ def build_dispatcher() -> Dispatcher:
                 session, event, user.id, AttendanceMethod.CODE
             )
         await message.answer("Отметил вас на встрече. Хорошего вечера!")
-
-    @dispatcher.message(F.chat.type.in_({"group", "supergroup"}))
-    async def remember_room_message(message: Message) -> None:
-        """Запоминает сообщения переговорок, чтобы потом их удалить.
-
-        Сообщения чужих чатов сюда не попадут: rooms.remember молча выходит,
-        если чата нет в пуле.
-        """
-        async with SessionLocal() as session:
-            await rooms.remember(session, message.chat.id, message.message_id)
 
     return dispatcher
 

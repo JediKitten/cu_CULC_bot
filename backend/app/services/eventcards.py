@@ -18,10 +18,26 @@ from app.models import (
     SlotVote,
     User,
 )
-from app.models.enums import ApplicationStatus, EventStatus, MemberKind
-from app.schemas import BookBrief, DemandCardOut, DemandTypeCount, EventOut, SlotOut
-from app.services import cards, people
+from app.models.enums import ApplicationStatus, EventStatus, MemberKind, UserRole
+from app.schemas import BookBrief, DemandCardOut, DemandTypeCount, EventOut, HostOut, SlotOut
+from app.services import cards, people, rooms
 from app.services import events as events_service
+
+
+async def topic_link_of(session: AsyncSession, application_id: int | None) -> str | None:
+    """Ссылка на тему заявки в форуме оргкомитета, если она жива."""
+    if application_id is None:
+        return None
+    from app.models import MeetingRoom
+
+    row = (
+        await session.execute(
+            sa.select(MeetingRoom.chat_id, OrganizerApplication.topic_id)
+            .join(MeetingRoom, MeetingRoom.id == OrganizerApplication.room_id)
+            .where(OrganizerApplication.id == application_id)
+        )
+    ).one_or_none()
+    return rooms.topic_link(row[0], row[1]) if row else None
 
 
 async def slots_of(
@@ -81,6 +97,8 @@ async def event_out(
             )
         )
     ).scalar_one_or_none()
+    is_admin = user.role.rank >= UserRole.ADMIN.rank
+    can_manage = is_admin or event.organizer_user_id == user.id
 
     return EventOut(
         id=event.id,
@@ -110,6 +128,9 @@ async def event_out(
         my_feedback_score=feedback,
         code_available=events_service.code_available(slot),
         cancel_reason=event.cancel_reason,
+        can_manage=can_manage,
+        is_admin=is_admin,
+        topic_link=await topic_link_of(session, event.application_id) if can_manage else None,
     )
 
 
@@ -119,8 +140,8 @@ async def visible_events(
     """Встречи, доступные этому человеку.
 
     Голосующиеся идут первыми — по ним ждут действия; дальше назначенные по
-    времени. Свои встречи организатора попадают сюда даже на стадии расстановки
-    окон: иначе он не нашёл бы, куда вернуться.
+    времени. Свои встречи ведущий видит всегда, даже если сам не проходит
+    по аудитории: иначе он не нашёл бы, куда вернуться.
     """
     profile = await session.get(Profile, user.id)
     stmt = (
@@ -138,22 +159,7 @@ async def visible_events(
             Event.id.desc(),
         )
     )
-    rows = list((await session.execute(stmt)).scalars().all())
-
-    own_pending = list(
-        (
-            await session.execute(
-                sa.select(Event).where(
-                    Event.organizer_user_id == user.id,
-                    Event.status == EventStatus.SLOT_SELECTION,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    known = {event.id for event in rows}
-    return [e for e in own_pending if e.id not in known] + rows
+    return list((await session.execute(stmt)).scalars().all())
 
 
 async def demand_cards(session: AsyncSession, user: User, limit: int = 50) -> list[DemandCardOut]:
@@ -199,20 +205,29 @@ async def demand_cards(session: AsyncSession, user: User, limit: int = 50) -> li
         )
 
     mine = await cards.my_demands(session, user.id, book_ids)
-    with_application = set(
-        (
-            await session.execute(
-                sa.select(OrganizerApplication.book_id).where(
-                    OrganizerApplication.book_id.in_(book_ids),
-                    OrganizerApplication.status.in_(
-                        (ApplicationStatus.SUBMITTED, ApplicationStatus.CHAT_OPEN)
-                    ),
-                )
-            )
+    # Кто вызвался вести: так видно, что по книге уже кто-то шевелится и
+    # ждать недолго, — и что вызваться можно вторым.
+    application_rows = await session.execute(
+        sa.select(
+            OrganizerApplication.book_id,
+            OrganizerApplication.user_id,
+            OrganizerApplication.status,
         )
-        .scalars()
-        .all()
+        .where(
+            OrganizerApplication.book_id.in_(book_ids),
+            OrganizerApplication.status.in_(
+                (ApplicationStatus.SUBMITTED, ApplicationStatus.CHAT_OPEN)
+            ),
+        )
+        .order_by(OrganizerApplication.id)
     )
+    applications = list(application_rows)
+    names = await people.names(session, [user_id for _, user_id, _ in applications])
+    hosts: dict[int, list[HostOut]] = {}
+    for book_id, user_id, status in applications:
+        hosts.setdefault(book_id, []).append(
+            HostOut(name=names.get(user_id, ""), status=status)
+        )
 
     briefs = await cards.decorate(
         session, user.id, [cards.brief_from_book(book) for book, *_ in found]
@@ -224,7 +239,8 @@ async def demand_cards(session: AsyncSession, user: User, limit: int = 50) -> li
             readers=readers,
             types=by_book.get(book.id, []),
             joined=book.id in mine,
-            has_application=book.id in with_application,
+            has_application=book.id in hosts,
+            hosts=hosts.get(book.id, []),
             last_demand_at=last_at,
         )
         for brief, (book, waiting, readers, last_at) in zip(briefs, found, strict=True)

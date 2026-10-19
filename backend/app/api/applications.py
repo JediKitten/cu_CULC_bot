@@ -1,7 +1,7 @@
 from typing import Annotated
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, RequireAdmin
@@ -10,7 +10,7 @@ from app.models import Book, Event, EventType, MeetingRoom, OrganizerApplication
 from app.models.enums import ApplicationStatus, MemberKind
 from app.schemas import ApplicationIn, ApplicationOut, ApproveIn, RejectIn
 from app.services import applications as service
-from app.services import cards, people
+from app.services import audit, cards, people, rooms
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -73,9 +73,14 @@ async def listing(
     _: RequireAdmin,
     session: Annotated[AsyncSession, Depends(get_session)],
     open_only: bool = True,
+    status_in: Annotated[list[ApplicationStatus] | None, Query(alias="status")] = None,
 ) -> list[ApplicationOut]:
+    """Заявки для оргкомитета. По умолчанию — открытые; с ?status=approved
+    и т. п. — нужные, чтобы одобренная заявка не терялась из виду."""
     stmt = sa.select(OrganizerApplication).order_by(OrganizerApplication.id.desc())
-    if open_only:
+    if status_in:
+        stmt = stmt.where(OrganizerApplication.status.in_(status_in)).limit(100)
+    elif open_only:
         stmt = stmt.where(
             OrganizerApplication.status.in_(
                 (ApplicationStatus.SUBMITTED, ApplicationStatus.CHAT_OPEN)
@@ -93,6 +98,27 @@ async def open_room(
 ) -> ApplicationOut:
     application = await _get(session, application_id)
     await service.open_room(session, application, actor_id=actor.id)
+    return await out(session, application)
+
+
+@router.post("/{application_id}/close-room", response_model=ApplicationOut)
+async def close_room(
+    application_id: int,
+    actor: RequireAdmin,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ApplicationOut:
+    """Удалить тему заявки в форуме вместе с перепиской — когда она больше не
+    нужна раньше, чем встреча закончилась, или зависла."""
+    application = await _get(session, application_id)
+    audit.log(
+        session,
+        actor_id=actor.id,
+        entity="application",
+        entity_id=application.id,
+        action="close_room",
+        payload={"topic_id": application.topic_id},
+    )
+    await service.close_room(session, application)
     return await out(session, application)
 
 
@@ -163,6 +189,7 @@ async def out(session: AsyncSession, application: OrganizerApplication) -> Appli
         audience=[MemberKind(value) for value in application.audience],
         room_title=room.title if room else None,
         invite_link=application.invite_link,
+        topic_link=rooms.topic_link(room.chat_id, application.topic_id) if room else None,
         decision_comment=application.decision_comment,
         created_at=application.created_at,
         event_id=event_id,

@@ -1,6 +1,6 @@
-"""Панель оргкомитета: модерация, переговорки, форматы, настройки, роли."""
+"""Панель оргкомитета: модерация, встречи, форум переговорок, форматы, настройки, роли."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import sqlalchemy as sa
@@ -9,16 +9,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import RequireAdmin, RequireModerator, RequireSuperadmin
 from app.db import get_session
-from app.models import Book, BookRequest, EventType, MeetingRoom, Profile, User
+from app.models import (
+    Book,
+    BookRequest,
+    Event,
+    EventSlot,
+    EventType,
+    MeetingRoom,
+    OrganizerApplication,
+    Profile,
+    SlotVote,
+    User,
+)
 from app.models.enums import (
     BookStatus,
     EventTypeStatus,
+    MemberKind,
     NotificationKind,
     RequestStatus,
-    RoomStatus,
     UserRole,
 )
 from app.schemas import (
+    AdminEventOut,
     BookRequestOut,
     EventTypeIn,
     RoleIn,
@@ -26,8 +38,12 @@ from app.schemas import (
     RoomOut,
     SettingIn,
     SettingOut,
+    TopicOut,
 )
-from app.services import audit, notify, rooms
+from app.services import audit, cards, eventcards, notify, rooms
+from app.services import events as events_service
+from app.services import people as people_service
+from app.services.applications import ACTIVE_EVENT_STATUSES
 from app.services.books.normalize import dedup_key
 from app.services.settings import REGISTRY, SettingsError, SettingsService
 
@@ -222,26 +238,35 @@ async def update_event_type(
     await session.commit()
 
 
-# --- Переговорки -------------------------------------------------------------
+# --- Форум переговорок -------------------------------------------------------
 
 
 @router.get("/rooms", response_model=list[RoomOut])
 async def listing_rooms(
     _: RequireAdmin, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> list[RoomOut]:
+    topics = dict(
+        (
+            await session.execute(
+                sa.select(OrganizerApplication.room_id, sa.func.count())
+                .where(OrganizerApplication.topic_id.is_not(None))
+                .group_by(OrganizerApplication.room_id)
+            )
+        ).all()
+    )
     rows = (
-        await session.execute(sa.select(MeetingRoom).order_by(MeetingRoom.id))
+        await session.execute(sa.select(MeetingRoom).order_by(MeetingRoom.id.desc()))
     ).scalars()
-    return [_room_out(room) for room in rows]
+    return [_room_out(room, topics.get(room.id, 0)) for room in rows]
 
 
-def _room_out(room: MeetingRoom) -> RoomOut:
+def _room_out(room: MeetingRoom, topics: int = 0) -> RoomOut:
     return RoomOut(
         id=room.id,
         chat_id=room.chat_id,
         title=room.title,
         status=room.status,
-        application_id=room.current_application_id,
+        topics=topics,
         checked_at=room.checked_at,
         check_error=room.check_error,
     )
@@ -253,11 +278,11 @@ async def add_room(
     actor: RequireAdmin,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RoomOut:
-    """Добавить чат в пул.
+    """Подключить форум.
 
-    Чат создаёт человек — бот этого не умеет. Здесь мы проверяем, что бот
-    в нём администратор с нужными правами, и только тогда заводим запись:
-    комната, которая заведомо не работает, в пуле не нужна.
+    Группу создаёт человек — бот этого не умеет. Здесь мы проверяем, что в ней
+    включены темы, а бот администратор с нужными правами, и только тогда
+    заводим запись.
     """
     try:
         room = await rooms.register(session, body.chat_id, body.title, actor.id)
@@ -272,11 +297,11 @@ async def delete_room(
     actor: RequireAdmin,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """Убрать комнату из пула. Сам чат остаётся: бот из него не выходит,
-    система просто перестаёт им распоряжаться."""
+    """Отключить форум. Сама группа и темы остаются: бот из неё не выходит,
+    система просто перестаёт ею распоряжаться."""
     room = await session.get(MeetingRoom, room_id)
     if room is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Комната не найдена")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Форум не найден")
     audit.log(
         session,
         actor_id=actor.id,
@@ -296,35 +321,105 @@ async def check_room(
 ) -> None:
     room = await session.get(MeetingRoom, room_id)
     if room is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Комната не найдена")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Форум не найден")
     await rooms.check(session, room)
 
 
-@router.post("/rooms/{room_id}/release", status_code=204)
-async def release_room(
-    room_id: int,
-    _: RequireAdmin,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> None:
-    """Принудительно освободить комнату — когда заявка зависла."""
-    room = await session.get(MeetingRoom, room_id)
-    if room is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Комната не найдена")
-    await rooms.release(session, room, kick_user_tg_id=None)
+@router.get("/topics", response_model=list[TopicOut])
+async def listing_topics(
+    _: RequireAdmin, session: Annotated[AsyncSession, Depends(get_session)]
+) -> list[TopicOut]:
+    """Живые темы форума — чтобы видеть, что в нём сейчас обсуждается."""
+    rows = (
+        await session.execute(
+            sa.select(OrganizerApplication, MeetingRoom.chat_id, Event.id, Event.status)
+            .join(MeetingRoom, MeetingRoom.id == OrganizerApplication.room_id)
+            .outerjoin(Event, Event.application_id == OrganizerApplication.id)
+            .where(OrganizerApplication.topic_id.is_not(None))
+            .order_by(OrganizerApplication.id.desc())
+        )
+    ).all()
+    result = []
+    for application, chat_id, event_id, event_status in rows:
+        book = await session.get(Book, application.book_id)
+        result.append(
+            TopicOut(
+                application_id=application.id,
+                book=cards.brief_from_book(book),
+                user_name=await people_service.name_of(session, application.user_id),
+                application_status=application.status,
+                event_id=event_id,
+                event_status=event_status,
+                link=rooms.topic_link(chat_id, application.topic_id),
+            )
+        )
+    return result
 
 
-@router.post("/rooms/{room_id}/disable", status_code=204)
-async def disable_room(
-    room_id: int,
-    _: RequireAdmin,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    disabled: bool = True,
-) -> None:
-    room = await session.get(MeetingRoom, room_id)
-    if room is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Комната не найдена")
-    room.status = RoomStatus.DISABLED if disabled else RoomStatus.FREE
-    await session.commit()
+# --- Встречи -----------------------------------------------------------------
+
+
+@router.get("/events", response_model=list[AdminEventOut])
+async def listing_events(
+    _: RequireAdmin, session: Annotated[AsyncSession, Depends(get_session)]
+) -> list[AdminEventOut]:
+    """Все встречи для оргкомитета — без фильтра аудитории.
+
+    Живые целиком, прошедшие и отменённые — за последний месяц: их смотрят,
+    чтобы вспомнить, что было, а не чтобы управлять.
+    """
+    month_ago = datetime.now(UTC) - timedelta(days=30)
+    events = (
+        (
+            await session.execute(
+                sa.select(Event)
+                .outerjoin(EventSlot, EventSlot.id == Event.slot_id)
+                .where(
+                    sa.or_(
+                        Event.status.in_(ACTIVE_EVENT_STATUSES),
+                        sa.func.coalesce(EventSlot.starts_at, Event.created_at) >= month_ago,
+                    )
+                )
+                .order_by(Event.id.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    result = []
+    for event in events:
+        book = await session.get(Book, event.book_id)
+        event_type = await session.get(EventType, event.event_type_id)
+        organizer = await session.get(User, event.organizer_user_id)
+        slot = await session.get(EventSlot, event.slot_id) if event.slot_id else None
+        voters = (
+            await session.execute(
+                sa.select(sa.func.count(sa.distinct(SlotVote.user_id))).where(
+                    SlotVote.event_id == event.id
+                )
+            )
+        ).scalar_one()
+        result.append(
+            AdminEventOut(
+                id=event.id,
+                book=cards.brief_from_book(book),
+                event_type_title=event_type.title if event_type else "",
+                organizer_id=event.organizer_user_id,
+                organizer_name=await people_service.name_of(session, event.organizer_user_id),
+                organizer_username=organizer.tg_username if organizer else None,
+                status=event.status,
+                audience=[MemberKind(value) for value in event.audience],
+                vote_deadline=event.vote_deadline,
+                starts_at=slot.starts_at if slot else None,
+                going=await events_service.count_going(session, event.id),
+                voters=voters,
+                application_id=event.application_id,
+                topic_link=await eventcards.topic_link_of(session, event.application_id),
+                cancel_reason=event.cancel_reason,
+            )
+        )
+    return result
 
 
 # --- Настройки и роли --------------------------------------------------------
